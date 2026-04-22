@@ -1,0 +1,27 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║  ⚠️  WARNING: RED TEAM TESTING ONLY - NOT FOR PRODUCTION FORENSICS         ║
+║                                                                              ║
+║  The scripts in this directory create persistence, spoof logs, and modify   ║
+║  system state. They are provided SOLELY for controlled testing environments  ║
+║  to validate that the defensive tools in the parent directories correctly    ║
+║  detect these techniques.                                                    ║
+║                                                                              ║
+║  DO NOT run these scripts on:                                               ║
+║  - Evidence-bearing machines                                                ║
+║  - Production systems                                                       ║
+║  - Systems undergoing forensic investigation                                ║
+║                                                                              ║
+║  Running these scripts on real evidence will contaminate the system state    ║
+║  and compromise the integrity of any forensic analysis.                      ║
+║                                                                              ║
+║  Use ONLY in isolated lab VMs with snapshots that can be reverted.           ║
+║                                                                              ║
+║  Scripts in this directory:                                                  ║
+║  - generate_agent.sh     (Creates masquerading launchd plist)               ║
+║  - install_agent.sh      (Deploys persistence to system paths)              ║
+║  - spoof_logs.sh         (Injects fake Apple log entries)                   ║
+║  - cleanup.sh            (Removes installed agents and artifacts)            ║
+║  - malicious_helper.sh   (Background process script for testing)           ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝

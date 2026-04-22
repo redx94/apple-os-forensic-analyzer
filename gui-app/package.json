@@ -1,0 +1,89 @@
+{
+  "name": "apple-os-forensic-analyzer",
+  "version": "2.0.0",
+  "description": "Modern GUI for Apple OS Forensic Analyzer",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
+    "pack": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
+    "dist": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "lucide-react": "^0.263.1",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.0.0",
+    "tailwind-merge": "^2.0.0",
+    "recharts": "^2.8.0",
+    "date-fns": "^2.30.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^4.3.9",
+    "electron": "^25.0.0",
+    "electron-builder": "^24.4.0",
+    "concurrently": "^8.2.0",
+    "wait-on": "^7.0.1",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.24",
+    "tailwindcss": "^3.3.2"
+  },
+  "build": {
+    "appId": "com.appleosforensic.analyzer",
+    "productName": "Apple OS Forensic Analyzer",
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "build/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "sign": null,
+      "identity": null,
+      "target": [
+        {
+          "target": "default",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "afterSign": null,
+    "afterPack": null,
+    "afterAllArtifactBuild": null,
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../collect",
+        "to": "collect"
+      },
+      {
+        "from": "../analyze",
+        "to": "analyze"
+      },
+      {
+        "from": "../score",
+        "to": "score"
+      },
+      {
+        "from": "../ios",
+        "to": "ios"
+      },
+      {
+        "from": "../lab",
+        "to": "lab"
+      }
+    ]
+  },
+  "keywords": ["forensic", "security", "macos", "ios", "analysis"],
+  "author": "Apple OS Forensic Analyzer",
+  "license": "MIT"
+}

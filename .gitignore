@@ -1,0 +1,40 @@
+# Output directories
+extract_ids_output/
+manifest_output/
+validate_output/
+verify_trust_output/
+xpc_scan_output/
+dns_monitor_output/
+score_output/
+tcc_scan_output/
+browser_audit_output/
+login_items_output/
+ios_forensic_output/
+forensic_reports/
+score_output/
+
+# GUI app
+gui-app/node_modules/
+gui-app/dist/
+gui-app/.DS_Store
+gui-app/build/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Temporary files
+*.tmp
+*.log
+*.bak
