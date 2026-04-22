@@ -5,6 +5,13 @@
 @layer base {
   body {
     @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01" on, "ss02" on, "cv01" on, "cv02" on;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: rgba(59, 130, 246, 0.30);
   }
 }
 
@@ -15,5 +22,11 @@
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
+  }
+
+  .grid-faint {
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(147, 164, 189, 0.10) 1px, transparent 0);
+    background-size: 28px 28px;
   }
 }
