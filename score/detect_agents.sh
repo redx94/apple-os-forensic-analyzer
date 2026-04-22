@@ -45,7 +45,7 @@ check_namespace_squatting() {
         
         if [[ "$is_trusted" == "false" ]]; then
             alert "NAMESPACE SQUATTING: $label → $binary (non-system path)"
-            ((TOTAL_ALERTS++))
+            ((++TOTAL_ALERTS))
             return 1
         fi
     fi
@@ -60,10 +60,18 @@ check_binary_signature() {
         return 0
     fi
     
+    # Check if it's a script (Apple doesn't sign scripts)
+    local file_type
+    file_type=$(file "$binary" 2>/dev/null)
+    if [[ "$file_type" == *"script"* ]] || [[ "$file_type" == *"text executable"* ]]; then
+        log "Skipping signature check for script: $binary"
+        return 0
+    fi
+    
     # Check if unsigned
     if ! codesign -v "$binary" 2>/dev/null; then
         alert "UNSIGNED APPLE-CLAIMING BINARY: $label → $binary"
-        ((TOTAL_ALERTS++))
+        ((++TOTAL_ALERTS))
         return 1
     fi
     
@@ -76,7 +84,7 @@ check_binary_signature() {
     if [[ "$label" == com.apple.* ]]; then
         if ! echo "$authority" | grep -qiE "Apple|Software Signing"; then
             alert "NON-APPLE SIGNATURE ON APPLE NAMESPACE: $label → $binary (Signer: $authority)"
-            ((TOTAL_ALERTS++))
+            ((++TOTAL_ALERTS))
             return 1
         fi
     fi
@@ -95,7 +103,7 @@ check_symlink_binary() {
         local target
         target=$(readlink "$binary")
         warn "SYMLINKED BINARY: $label → $binary -> $target"
-        ((TOTAL_ALERTS++))
+        ((++TOTAL_ALERTS))
     fi
 }
 
@@ -131,19 +139,20 @@ for dir in "${SCAN_DIRS[@]}"; do
     
     for plist in "$dir"/*.plist; do
         [[ ! -f "$plist" ]] && continue
-        ((TOTAL_SCANNED++))
+        ((++TOTAL_SCANNED))
 
         label=$(/usr/libexec/PlistBuddy -c "Print :Label" "$plist" 2>/dev/null || grep -A1 "<key>Label</key>" "$plist" | grep "<string>" | sed -E 's/.*<string>(.*)<\/string>.*/\1/')
 
         [[ -z "$label" ]] && continue
 
-        binary=$(/usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2>/dev/null || echo "N/A")
+        # Try Program first (full path), fall back to ProgramArguments:0 (binary name only)
+        binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2>/dev/null || echo "N/A")
         
         # Pattern-based detection
         for pat in "${SUSPICIOUS_PATTERNS[@]}"; do
             if [[ "$label" == *"$pat"* ]]; then
                 alert "SUSPICIOUS LABEL PATTERN: $label ($plist)"
-                ((TOTAL_ALERTS++))
+                ((++TOTAL_ALERTS))
             fi
         done
         

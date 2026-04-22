@@ -6,6 +6,11 @@ const os = require('os');
 
 let mainWindow;
 
+const isDev = !app.isPackaged;
+
+// Get the parent directory (project root) regardless of where Electron is launched from
+const projectRoot = path.join(__dirname, '..', '..');
+
 // Tool catalog with metadata
 const TOOLS = {
   collect: [
@@ -20,18 +25,18 @@ const TOOLS = {
     },
     {
       id: 'extract_ids_live',
-      name: 'Extract Live Services',
-      description: 'Extract identifiers from running launchctl services',
-      script: '../collect/extract_ids.sh',
+      name: 'Extract Live Identifiers',
+      description: 'Extract com.apple.* identifiers from running processes',
+      script: 'collect/extract_ids.sh',
       args: ['--live'],
       category: 'Collection',
       icon: 'activity'
     },
     {
       id: 'extract_ids_plists',
-      name: 'Extract from Plists',
-      description: 'Extract identifiers from launchd plist directories',
-      script: '../collect/extract_ids.sh',
+      name: 'Extract Plist Identifiers',
+      description: 'Extract com.apple.* identifiers from launchd plists',
+      script: 'collect/extract_ids.sh',
       args: ['--plists'],
       category: 'Collection',
       icon: 'file-text'
@@ -39,17 +44,17 @@ const TOOLS = {
     {
       id: 'manifest_generator',
       name: 'Generate Evidence Manifest',
-      description: 'Create machine-readable manifest with hashes and timestamps',
-      script: '../collect/manifest_generator.sh',
+      description: 'Create comprehensive evidence manifest',
+      script: 'collect/manifest_generator.sh',
       args: [],
       category: 'Collection',
-      icon: 'hash'
+      icon: 'file-check'
     },
     {
       id: 'save_baseline',
       name: 'Save Baseline',
       description: 'Save current state as baseline for differential comparison',
-      script: '../collect/extract_ids.sh',
+      script: 'collect/extract_ids.sh',
       args: ['--baseline'],
       category: 'Collection',
       icon: 'save'
@@ -58,7 +63,7 @@ const TOOLS = {
       id: 'diff_baseline',
       name: 'Compare to Baseline',
       description: 'Detect changes since baseline',
-      script: '../collect/extract_ids.sh',
+      script: 'collect/extract_ids.sh',
       args: ['--diff'],
       category: 'Collection',
       icon: 'git-diff'
@@ -68,8 +73,8 @@ const TOOLS = {
     {
       id: 'validate_nodes',
       name: 'Validate Nodes',
-      description: 'Validate identifiers against dynamic system whitelist',
-      script: '../analyze/validate_nodes.py',
+      description: 'Validate extracted nodes against whitelist',
+      script: 'analyze/validate_nodes.py',
       args: ['--demo'],
       category: 'Analysis',
       icon: 'check-circle'
@@ -79,26 +84,26 @@ const TOOLS = {
     {
       id: 'detect_agents',
       name: 'Detect Suspicious Agents',
-      description: 'Scan for namespace squatting and suspicious persistence',
-      script: '../score/detect_agents.sh',
+      description: 'Scan for suspicious launchd agents and persistence',
+      script: 'score/detect_agents.sh',
       args: [],
       category: 'Scoring',
-      icon: 'shield-alert'
+      icon: 'shield'
     },
     {
       id: 'verify_trust',
       name: 'Verify Trust',
-      description: 'Verify signatures, entitlements, and paths',
-      script: '../score/verify_trust.sh',
+      description: 'Verify code signing trust',
+      script: 'score/verify_trust.sh',
       args: [],
       category: 'Scoring',
-      icon: 'shield-check'
+      icon: 'check-circle'
     },
     {
       id: 'verify_extracted_ids',
-      name: 'Deep Verify Extracted IDs',
+      name: 'Verify Extracted IDs',
       description: 'Cryptographic verification of extracted identifiers',
-      script: '../score/verify_extracted_ids.sh',
+      script: 'score/verify_extracted_ids.sh',
       args: [],
       category: 'Scoring',
       icon: 'fingerprint'
@@ -107,7 +112,7 @@ const TOOLS = {
       id: 'xpc_scanner',
       name: 'XPC Scanner',
       description: 'Check for XPC service squatting',
-      script: '../score/xpc_scanner.sh',
+      script: 'score/xpc_scanner.sh',
       args: [],
       category: 'Scoring',
       icon: 'network'
@@ -116,7 +121,7 @@ const TOOLS = {
       id: 'dns_monitor',
       name: 'DNS Monitor',
       description: 'Monitor DNS for hijacking and drift',
-      script: '../score/dns_monitor.sh',
+      script: 'score/dns_monitor.sh',
       args: ['--check'],
       category: 'Scoring',
       icon: 'globe'
@@ -125,8 +130,8 @@ const TOOLS = {
       id: 'confidence_scorer',
       name: 'Confidence Scorer',
       description: 'Risk scoring engine (0-100)',
-      script: '../score/confidence_scorer.py',
-      args: ['--input', '../extract_ids_output/apple_ids_*.txt'],
+      script: 'score/confidence_scorer.py',
+      args: ['--input', 'extract_ids_output/apple_ids_*.txt'],
       category: 'Scoring',
       icon: 'bar-chart-2'
     },
@@ -134,7 +139,7 @@ const TOOLS = {
       id: 'tcc_scanner',
       name: 'TCC Scanner',
       description: 'Scan privacy permissions',
-      script: '../score/tcc_scanner.sh',
+      script: 'score/tcc_scanner.sh',
       args: [],
       category: 'Scoring',
       icon: 'lock'
@@ -143,7 +148,7 @@ const TOOLS = {
       id: 'browser_auditor',
       name: 'Browser Extension Auditor',
       description: 'Audit browser extensions for persistence',
-      script: '../score/browser_extension_auditor.sh',
+      script: 'score/browser_extension_auditor.sh',
       args: [],
       category: 'Scoring',
       icon: 'browser'
@@ -152,10 +157,46 @@ const TOOLS = {
       id: 'login_items_checker',
       name: 'Login Items Checker',
       description: 'Check login items and background tasks',
-      script: '../score/login_items_checker.sh',
+      script: 'score/login_items_checker.sh',
       args: [],
       category: 'Scoring',
       icon: 'log-in'
+    },
+    {
+      id: 'parent_process_analyzer',
+      name: 'Parent Process Analyzer',
+      description: 'Detect unusual parent process relationships for com.apple.* objects',
+      script: 'score/parent_process_analyzer.sh',
+      args: [],
+      category: 'Scoring',
+      icon: 'git-branch'
+    },
+    {
+      id: 'network_behavior_analyzer',
+      name: 'Network Behavior Analyzer',
+      description: 'Monitor com.apple.* network connections for suspicious patterns',
+      script: 'score/network_behavior_analyzer.sh',
+      args: [],
+      category: 'Scoring',
+      icon: 'activity'
+    },
+    {
+      id: 'entitlement_verifier',
+      name: 'Entitlement Verifier',
+      description: 'Inspect entitlements for mismatches and suspicious grants',
+      script: 'score/entitlement_verifier.sh',
+      args: [],
+      category: 'Scoring',
+      icon: 'shield'
+    },
+    {
+      id: 'hash_verifier',
+      name: 'Hash Verifier',
+      description: 'Compare binary hashes against known-good Apple baselines',
+      script: 'score/hash_verifier.sh',
+      args: [],
+      category: 'Scoring',
+      icon: 'fingerprint'
     }
   ],
   ios: [
@@ -163,7 +204,7 @@ const TOOLS = {
       id: 'ios_sysdiagnose',
       name: 'iOS Sysdiagnose Analyzer',
       description: 'Analyze iOS sysdiagnose or backup',
-      script: '../ios/analyze_ios_sysdiagnose.sh',
+      script: 'ios/analyze_ios_sysdiagnose.sh',
       args: [],
       category: 'iOS',
       icon: 'smartphone'
@@ -187,7 +228,20 @@ function createWindow() {
     show: false
   });
 
-  mainWindow.loadFile('dist/index.html');
+  if (isDev) {
+    const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173';
+    mainWindow.loadURL(devUrl);
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
+    if (!fs.existsSync(indexPath)) {
+      dialog.showErrorBox(
+        'UI Build Missing',
+        `Could not find the UI build at:\n\n${indexPath}\n\nRun "npm run build" in gui-app and try again.`
+      );
+    }
+    mainWindow.loadFile(indexPath);
+  }
   
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -265,13 +319,17 @@ ipcMain.handle('execute-tool', async (event, toolId, args = []) => {
       return;
     }
 
-    // Resolve script path relative to the app resources
-    const scriptPath = path.join(__dirname, tool.script);
+    // Resolve script path relative to project root
+    const scriptPath = path.join(projectRoot, tool.script);
     const toolArgs = args.length > 0 ? args : tool.args;
 
+    // Determine interpreter based on file extension
+    const isPython = scriptPath.endsWith('.py');
+    const interpreter = isPython ? 'python3' : 'bash';
+
     // Run with sudo for root privileges
-    const child = spawn('sudo', ['bash', scriptPath, ...toolArgs], {
-      cwd: path.join(__dirname, '..'),
+    const child = spawn('sudo', [interpreter, scriptPath, ...toolArgs], {
+      cwd: projectRoot,
       env: { ...process.env, PATH: process.env.PATH }
     });
 
@@ -287,13 +345,13 @@ ipcMain.handle('execute-tool', async (event, toolId, args = []) => {
     child.stderr.on('data', (data) => {
       const text = data.toString();
       errorOutput += text;
-      event.sender.send('tool-error', text);
+      event.sender.send('tool-output', text); // Send stderr as output too
     });
 
     child.on('close', (code) => {
       resolve({
         exitCode: code,
-        output,
+        output: output + errorOutput,
         error: errorOutput,
         success: code === 0
       });
@@ -303,6 +361,89 @@ ipcMain.handle('execute-tool', async (event, toolId, args = []) => {
       reject(err);
     });
   });
+});
+
+ipcMain.handle('run-full-scan', async (event) => {
+  const results = [];
+  const allTools = [];
+
+  // Collect all tools in order
+  for (const category in TOOLS) {
+    allTools.push(...TOOLS[category]);
+  }
+
+  for (const tool of allTools) {
+    event.sender.send('tool-output', `\n=== Executing: ${tool.name} ===\n`);
+    event.sender.send('tool-output', `${tool.description}\n\n`);
+
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const scriptPath = path.join(projectRoot, tool.script);
+        const toolArgs = tool.args;
+        const isPython = scriptPath.endsWith('.py');
+        const interpreter = isPython ? 'python3' : 'bash';
+
+        const child = spawn('sudo', [interpreter, scriptPath, ...toolArgs], {
+          cwd: projectRoot,
+          env: { ...process.env, PATH: process.env.PATH }
+        });
+
+        let output = '';
+        let errorOutput = '';
+
+        child.stdout.on('data', (data) => {
+          const text = data.toString();
+          output += text;
+          event.sender.send('tool-output', text);
+        });
+
+        child.stderr.on('data', (data) => {
+          const text = data.toString();
+          errorOutput += text;
+          event.sender.send('tool-output', text);
+        });
+
+        child.on('close', (code) => {
+          resolve({
+            toolId: tool.id,
+            toolName: tool.name,
+            exitCode: code,
+            output: output + errorOutput,
+            success: code === 0
+          });
+        });
+
+        child.on('error', (err) => {
+          resolve({
+            toolId: tool.id,
+            toolName: tool.name,
+            exitCode: -1,
+            output: err.message,
+            success: false
+          });
+        });
+      });
+
+      results.push(result);
+      event.sender.send('tool-output', `\n--- ${tool.name} completed (Exit: ${result.exitCode}) ---\n`);
+    } catch (error) {
+      results.push({
+        toolId: tool.id,
+        toolName: tool.name,
+        exitCode: -1,
+        output: error.message,
+        success: false
+      });
+      event.sender.send('tool-output', `\n--- ${tool.name} failed: ${error.message} ---\n`);
+    }
+  }
+
+  event.sender.send('tool-output', `\n=== FULL SCAN COMPLETE ===\n`);
+  event.sender.send('tool-output', `Total tools executed: ${results.length}\n`);
+  event.sender.send('tool-output', `Successful: ${results.filter(r => r.success).length}\n`);
+  event.sender.send('tool-output', `Failed: ${results.filter(r => !r.success).length}\n`);
+
+  return results;
 });
 
 ipcMain.handle('read-file', async (event, filePath) => {

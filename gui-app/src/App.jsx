@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Search, BarChart3, Smartphone, PlaySquare, FileText, Settings, Activity, Terminal } from 'lucide-react';
+import { Shield, PlaySquare, FileText, Activity, Terminal, ChevronRight, Cpu, HardDrive, Monitor, Copy } from 'lucide-react';
 import ToolCatalog from './components/ToolCatalog';
 import ExecutionPanel from './components/ExecutionPanel';
 import ResultsViewer from './components/ResultsViewer';
@@ -74,6 +74,40 @@ function App() {
     }
   };
 
+  const handleRunFullScan = async () => {
+    setIsExecuting(true);
+    setExecutionOutput('');
+    setExecutionResult(null);
+    setSelectedTool(null);
+    setActiveTab('execution');
+
+    const outputHandler = (data) => {
+      setExecutionOutput(prev => prev + data);
+    };
+
+    window.electronAPI.onToolOutput(outputHandler);
+
+    try {
+      const results = await window.electronAPI.runFullScan();
+      setExecutionResult({
+        exitCode: 0,
+        output: executionOutput,
+        success: true,
+        scanResults: results
+      });
+    } catch (error) {
+      setExecutionResult({
+        exitCode: -1,
+        output: executionOutput,
+        error: error.message,
+        success: false
+      });
+    } finally {
+      window.electronAPI.removeListeners();
+      setIsExecuting(false);
+    }
+  };
+
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
     { id: 'tools', label: 'Tools', icon: Shield },
@@ -81,106 +115,157 @@ function App() {
     { id: 'results', label: 'Results', icon: FileText },
   ];
 
+  const copySystemSummary = async () => {
+    if (!systemInfo) return;
+    const summary = [
+      `Platform: ${systemInfo.platform}`,
+      `Arch: ${systemInfo.arch}`,
+      `Hostname: ${systemInfo.hostname}`,
+      `CPU Cores: ${systemInfo.cpus}`,
+      `Memory: ${systemInfo.totalmem ? `${(systemInfo.totalmem / 1024 / 1024 / 1024).toFixed(1)} GB` : 'Unknown'}`,
+    ].join('\n');
+    try {
+      await navigator.clipboard.writeText(summary);
+    } catch (e) {
+      console.error('Failed to copy system summary:', e);
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-background text-foreground">
-      {/* Sidebar */}
-      <div className="w-64 bg-card border-r border-border flex flex-col">
-        <div className="p-6 border-b border-border">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <Shield className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="font-bold text-lg">Forensic Analyzer</h1>
-              <p className="text-xs text-muted-foreground">v2.0.0</p>
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex-1 p-4 space-y-2">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                activeTab === tab.id
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <tab.icon className="w-5 h-5" />
-              <span className="font-medium">{tab.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        {systemInfo && (
-          <div className="p-4 border-t border-border">
-            <div className="text-xs text-muted-foreground space-y-1">
-              <div className="flex justify-between">
-                <span>Platform:</span>
-                <span className="text-foreground">{systemInfo.platform}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Arch:</span>
-                <span className="text-foreground">{systemInfo.arch}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Hostname:</span>
-                <span className="text-foreground">{systemInfo.hostname}</span>
+    <div className="h-screen bg-background text-foreground">
+      <div className="h-full grid-faint">
+        <div className="h-full flex">
+          {/* Sidebar */}
+          <div className="w-72 bg-card/95 backdrop-blur border-r border-border flex flex-col">
+            <div className="p-6 border-b border-border">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-ring flex items-center justify-center shadow">
+                    <Shield className="w-5 h-5 text-primary-foreground" />
+                  </div>
+                  <div>
+                    <h1 className="font-semibold tracking-tight">Apple OS Forensic Analyzer</h1>
+                    <p className="text-xs text-muted-foreground">Advanced threat hunting console</p>
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">v2.0.0</div>
               </div>
             </div>
-          </div>
-        )}
-      </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="h-16 border-b border-border flex items-center justify-between px-6 bg-background">
-          <h2 className="text-xl font-semibold">
-            {tabs.find(t => t.id === activeTab)?.label}
-          </h2>
-          <div className="flex items-center gap-4">
-            {isExecuting && (
-              <div className="flex items-center gap-2 text-sm text-accent">
-                <div className="w-2 h-2 bg-accent rounded-full animate-pulse" />
-                <span>Executing...</span>
+            <nav className="flex-1 p-4 space-y-1">
+              {tabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`group w-full flex items-center justify-between px-4 py-3 rounded-xl transition-colors ${
+                    activeTab === tab.id
+                      ? 'bg-muted text-foreground'
+                      : 'hover:bg-muted/70 text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span className="flex items-center gap-3">
+                    <tab.icon className="w-5 h-5" />
+                    <span className="font-medium">{tab.label}</span>
+                  </span>
+                  <ChevronRight className={`w-4 h-4 transition-opacity ${activeTab === tab.id ? 'opacity-80' : 'opacity-0 group-hover:opacity-60'}`} />
+                </button>
+              ))}
+            </nav>
+
+            {/* System Capsule */}
+            {systemInfo && (
+              <div className="p-4 border-t border-border">
+                <div className="rounded-xl bg-background/40 border border-border p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-semibold text-muted-foreground tracking-wide">SYSTEM</div>
+                    <button
+                      onClick={copySystemSummary}
+                      className="p-2 rounded-lg hover:bg-muted/60 transition-colors"
+                      title="Copy system summary"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-2 text-muted-foreground"><Monitor className="w-4 h-4" /> Host</span>
+                      <span className="font-medium truncate max-w-[11rem]" title={systemInfo.hostname}>{systemInfo.hostname}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-2 text-muted-foreground"><Cpu className="w-4 h-4" /> CPU</span>
+                      <span className="font-medium">{systemInfo.arch} • {systemInfo.cpus}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-2 text-muted-foreground"><HardDrive className="w-4 h-4" /> RAM</span>
+                      <span className="font-medium">{systemInfo.totalmem ? `${(systemInfo.totalmem / 1024 / 1024 / 1024).toFixed(1)} GB` : 'Unknown'}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
-        </div>
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-auto p-6">
-          {activeTab === 'dashboard' && (
-            <Dashboard
-              tools={tools}
-              onToolSelect={handleToolSelect}
-              systemInfo={systemInfo}
-            />
-          )}
+          {/* Main Content */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Command Bar */}
+            <div className="h-16 border-b border-border flex items-center justify-between px-6 bg-background/60 backdrop-blur">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-semibold tracking-tight">
+                  {tabs.find(t => t.id === activeTab)?.label}
+                </h2>
+                {selectedTool && activeTab === 'execution' && (
+                  <span className="text-xs px-2 py-1 rounded-full bg-muted text-muted-foreground border border-border">
+                    {selectedTool.name}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                {isExecuting && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <div className="w-2 h-2 bg-accent rounded-full animate-pulse" />
+                    <span className="text-accent font-medium">Executing</span>
+                  </div>
+                )}
+                <div className="hidden md:flex items-center gap-2 text-xs text-muted-foreground">
+                  <Terminal className="w-4 h-4" />
+                  <span>Root-enabled workflows supported</span>
+                </div>
+              </div>
+            </div>
 
-          {activeTab === 'tools' && tools && (
-            <ToolCatalog
-              tools={tools}
-              onToolSelect={handleToolSelect}
-            />
-          )}
+            {/* Content Area */}
+            <div className="flex-1 overflow-auto p-6">
+              {activeTab === 'dashboard' && (
+                <Dashboard
+                  tools={tools}
+                  onToolSelect={handleToolSelect}
+                  systemInfo={systemInfo}
+                  onRunFullScan={handleRunFullScan}
+                />
+              )}
 
-          {activeTab === 'execution' && (
-            <ExecutionPanel
-              tool={selectedTool}
-              isExecuting={isExecuting}
-              output={executionOutput}
-              result={executionResult}
-              onExecute={handleToolExecute}
-            />
-          )}
+              {activeTab === 'tools' && tools && (
+                <ToolCatalog
+                  tools={tools}
+                  onToolSelect={handleToolSelect}
+                />
+              )}
 
-          {activeTab === 'results' && (
-            <ResultsViewer />
-          )}
+              {activeTab === 'execution' && (
+                <ExecutionPanel
+                  tool={selectedTool}
+                  isExecuting={isExecuting}
+                  output={executionOutput}
+                  result={executionResult}
+                  onExecute={handleToolExecute}
+                />
+              )}
+
+              {activeTab === 'results' && (
+                <ResultsViewer />
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import React from 'react';
-import { Search, Shield, BarChart3, Smartphone, Activity, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Search, Shield, BarChart3, Smartphone, Activity, AlertTriangle, CheckCircle, Clock, Play } from 'lucide-react';
 
-export default function Dashboard({ tools, onToolSelect, systemInfo }) {
+export default function Dashboard({ tools, onToolSelect, systemInfo, onRunFullScan }) {
   const categories = [
     { id: 'collect', name: 'Collection', icon: Search, color: 'bg-blue-500' },
     { id: 'analyze', name: 'Analysis', icon: Shield, color: 'bg-purple-500' },
@@ -134,13 +134,23 @@ export default function Dashboard({ tools, onToolSelect, systemInfo }) {
         <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
         <div className="grid grid-cols-4 gap-4">
           <button
+            onClick={onRunFullScan}
+            className="bg-primary text-primary-foreground rounded-lg p-4 hover:bg-primary/90 transition-colors"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Play className="w-4 h-4" />
+              <div className="font-semibold">Run Full Scan</div>
+            </div>
+            <div className="text-sm opacity-90">Execute all tools in sequence</div>
+          </button>
+          <button
             onClick={() => {
               const tool = tools?.collect?.find(t => t.id === 'extract_ids_all');
               if (tool) onToolSelect(tool);
             }}
-            className="bg-primary text-primary-foreground rounded-lg p-4 hover:bg-primary/90 transition-colors"
+            className="bg-secondary text-secondary-foreground rounded-lg p-4 hover:bg-secondary/80 transition-colors"
           >
-            <div className="font-semibold mb-1">Full Scan</div>
+            <div className="font-semibold mb-1">Extract IDs</div>
             <div className="text-sm opacity-90">Extract all identifiers</div>
           </button>
           <button
@@ -152,16 +162,6 @@ export default function Dashboard({ tools, onToolSelect, systemInfo }) {
           >
             <div className="font-semibold mb-1">Persistence Scan</div>
             <div className="text-sm opacity-90">Check for suspicious agents</div>
-          </button>
-          <button
-            onClick={() => {
-              const tool = tools?.collect?.find(t => t.id === 'manifest_generator');
-              if (tool) onToolSelect(tool);
-            }}
-            className="bg-secondary text-secondary-foreground rounded-lg p-4 hover:bg-secondary/80 transition-colors"
-          >
-            <div className="font-semibold mb-1">Generate Manifest</div>
-            <div className="text-sm opacity-90">Create evidence manifest</div>
           </button>
           <button
             onClick={handleRequestPermissions}

@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTools: () => ipcRenderer.invoke('get-tools'),
   selectFile: () => ipcRenderer.invoke('select-file'),
   executeTool: (toolId, args) => ipcRenderer.invoke('execute-tool', toolId, args),
+  runFullScan: () => ipcRenderer.invoke('run-full-scan'),
   readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
   readOutputDir: (dirName) => ipcRenderer.invoke('read-output-dir', dirName),
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
