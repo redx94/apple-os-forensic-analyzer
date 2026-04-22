@@ -1,0 +1,17 @@
+# Code Owners File
+# This file defines who must approve changes to specific files/paths
+
+# Lab directory contains red-team testing utilities
+# Requires explicit approval from project maintainer before merging
+lab/ @redx94
+
+# Core security-critical files
+gui-app/electron/main.cjs @redx94
+gui-app/electron/preload.js @redx94
+
+# Forensic analysis scripts
+score/ @redx94
+analyze/ @redx94
+
+# Global fallback - any unowned files
+* @redx94

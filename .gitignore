@@ -38,3 +38,6 @@ env/
 *.tmp
 *.log
 *.bak
+
+# Secrets baseline (contains patterns, not actual secrets, but keep local)
+.secrets.baseline
