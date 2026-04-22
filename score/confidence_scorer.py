@@ -20,9 +20,17 @@ def warn(m):  print(f"{YELLOW}[!]{RESET} {m}")
 def alert(m): print(f"{RED}{BOLD}[ALERT]{RESET} {m}")
 
 TRUSTED_PATHS = ("/System/Library", "/usr/bin", "/usr/sbin", "/usr/libexec", "/bin", "/sbin", "/Library/Apple")
-DANGEROUS_ENTITLEMENTS = ("com.apple.private.tcc.allow", "com.apple.rootless.install", 
+DANGEROUS_ENTITLEMENTS = ("com.apple.private.tcc.allow", "com.apple.rootless.install",
                           "com.apple.security.get-task-allow", "com.apple.private.admin.writeconfig",
                           "com.apple.security.cs.allow-unsigned-executable-memory")
+
+AI_RISK_INDICATORS = {
+    "perfect_formatting": 5,      # Plist/XPC definition with zero formatting variance
+    "entropy_anomaly": 10,        # Unusually consistent entropy in generated files
+    "timing_precision": 5,        # Execution intervals that are suspiciously optimal
+    "rapid_mutation": 15,         # File changed multiple times with no human-like iteration
+    "cross_vector_correlation": 20, # Same identifier appears in launchd + XPC + UTI + logs
+}
 
 def get_signature_info(binary_path):
     """Get code signature information for a binary"""
@@ -119,7 +127,66 @@ def score_path_risk(binary_path):
     
     return score, reasons
 
-def calculate_risk_score(identifier, binary_path):
+def score_ai_likelihood(artifact_path, artifact_type="binary", historical_versions=None):
+    """
+    Score how likely this artifact is AI-generated.
+    Higher score = more likely crafted by AI for evasion.
+    """
+    score = 0
+    reasons = []
+    
+    if not Path(artifact_path).exists():
+        return score, reasons
+    
+    # Check formatting perfection (AI tends to produce 'too clean' output)
+    if artifact_type in ("plist", "binary"):
+        try:
+            with open(artifact_path, 'r', errors='ignore') as f:
+                lines = f.readlines()
+            
+            if len(lines) > 10:
+                unique_lines = len(set(line.strip() for line in lines))
+                formatting_ratio = unique_lines / len(lines)
+                
+                if formatting_ratio > 0.95:
+                    score += AI_RISK_INDICATORS["perfect_formatting"]
+                    reasons.append("Suspiciously perfect formatting (possible AI generation)")
+        except Exception:
+            pass
+    
+    # Check for cross-vector correlation (AI campaigns often reuse identifiers)
+    if historical_versions:
+        vector_count = 0
+        for hist in historical_versions:
+            if hist.get("identifier") == Path(artifact_path).stem:
+                vector_count += 1
+        
+        if vector_count >= 3:
+            score += AI_RISK_INDICATORS["cross_vector_correlation"]
+            reasons.append(f"Identifier appears across {vector_count} attack vectors (AI campaign pattern)")
+    
+    # Check rapid mutation without human iteration patterns
+    if historical_versions and len(historical_versions) > 5:
+        # Check if changes are too rapid or mechanical
+        time_diffs = []
+        for i in range(1, len(historical_versions)):
+            try:
+                t1 = historical_versions[i-1].get("timestamp", 0)
+                t2 = historical_versions[i].get("timestamp", 0)
+                if t1 and t2:
+                    time_diffs.append(abs(t2 - t1))
+            except Exception:
+                pass
+        
+        if time_diffs and len(time_diffs) > 3:
+            avg_diff = sum(time_diffs) / len(time_diffs)
+            if avg_diff < 300:  # Less than 5 minutes between changes
+                score += AI_RISK_INDICATORS["rapid_mutation"]
+                reasons.append("Rapid mutation without human-like iteration patterns")
+    
+    return score, reasons
+
+def calculate_risk_score(identifier, binary_path, historical_versions=None):
     """Calculate overall risk score (0-100)"""
     signature_info = get_signature_info(binary_path)
     entitlements = get_entitlements(binary_path)
@@ -127,9 +194,12 @@ def calculate_risk_score(identifier, binary_path):
     namespace_score, namespace_reasons = score_namespace_risk(identifier, binary_path, signature_info)
     ent_score, ent_reasons = score_entitlement_risk(entitlements)
     path_score, path_reasons = score_path_risk(binary_path)
+    ai_score, ai_reasons = score_ai_likelihood(binary_path, "binary", historical_versions)
     
-    total_score = min(namespace_score + ent_score + path_score, 100)
-    all_reasons = namespace_reasons + ent_reasons + path_reasons
+    # Updated risk formula: Total Risk = namespace_risk + entitlement_risk + path_risk + ai_likelihood_risk
+    # Max: 120 (capped at 100)
+    total_score = min(namespace_score + ent_score + path_score + ai_score, 100)
+    all_reasons = namespace_reasons + ent_reasons + path_reasons + ai_reasons
     
     risk_level = "LOW" if total_score < 30 else "MEDIUM" if total_score < 70 else "HIGH"
     
@@ -138,7 +208,8 @@ def calculate_risk_score(identifier, binary_path):
         "level": risk_level,
         "reasons": all_reasons,
         "signature": signature_info,
-        "entitlements": entitlements
+        "entitlements": entitlements,
+        "ai_likelihood": ai_score
     }
 
 def print_score_report(identifier, binary_path, risk_result):
@@ -149,6 +220,9 @@ def print_score_report(identifier, binary_path, risk_result):
     print(f"\n{BOLD}=== {identifier} ==={RESET}")
     print(f"Binary: {binary_path}")
     print(f"Risk Score: {color}{risk_result['score']}/100 ({risk_result['level']}){RESET}")
+    
+    if risk_result["ai_likelihood"] > 0:
+        print(f"  AI Likelihood Score: {YELLOW}{risk_result['ai_likelihood']}/55{RESET}")
     
     if risk_result["reasons"]:
         print(f"{BOLD}Reasons:{RESET}")

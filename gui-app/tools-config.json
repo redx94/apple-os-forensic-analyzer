@@ -183,6 +183,33 @@
       "args": [],
       "category": "Scoring",
       "icon": "fingerprint"
+    },
+    {
+      "id": "detect_log_spoofing",
+      "name": "Log Spoofing Detector",
+      "description": "Detect malware using os_log_create with fake Apple subsystem strings",
+      "script": "score/detect_log_spoofing.sh",
+      "args": [],
+      "category": "Scoring",
+      "icon": "file-text"
+    },
+    {
+      "id": "detect_uti_hijacking",
+      "name": "UTI Hijacking Detector",
+      "description": "Detect malicious apps hijacking file type handlers via UTI declarations",
+      "script": "score/detect_uti_hijacking.sh",
+      "args": [],
+      "category": "Scoring",
+      "icon": "file-check"
+    },
+    {
+      "id": "defense_checklist",
+      "name": "Defense Checklist",
+      "description": "Integrated defense checklist running all 5 core security checks",
+      "script": "score/defense_checklist.sh",
+      "args": [],
+      "category": "Scoring",
+      "icon": "shield"
     }
   ],
   "ios": [

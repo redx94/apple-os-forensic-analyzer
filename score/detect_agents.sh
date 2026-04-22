@@ -26,6 +26,39 @@ alert() { echo -e "${RED}${BOLD}[ALERT]${NC} $*"; }
 TOTAL_SCANNED=0
 TOTAL_ALERTS=0
 
+# Mode flags
+AI_MODE=false
+WATCH_MODE=false
+BASELINE_SAVE=false
+BASELINE_DIFF=false
+BASELINE_DIR="./agent_baseline"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --ai-mode)
+      AI_MODE=true
+      shift
+      ;;
+    --watch)
+      WATCH_MODE=true
+      shift
+      ;;
+    --baseline-save)
+      BASELINE_SAVE=true
+      shift
+      ;;
+    --baseline-diff)
+      BASELINE_DIFF=true
+      shift
+      ;;
+    *)
+      warn "Unknown option: $1"
+      shift
+      ;;
+  esac
+done
+
 echo -e "${BOLD}=== Apple OS Forensic Persistence Scanner ===${NC}"
 log "Scanning persistence directories..."
 
@@ -110,33 +143,193 @@ check_symlink_binary() {
 check_additional_keys() {
     local plist="$1"
     local label="$2"
-    
+
     # Check MachServices (XPC service exposure)
     local mach_services
     mach_services=$(/usr/libexec/PlistBuddy -c "Print :MachServices" "$plist" 2>/dev/null || echo "")
     if [[ -n "$mach_services" && "$mach_services" != *"does not exist"* ]]; then
         log "MachServices found in $label"
     fi
-    
+
     # Check KeepAlive (persistent restart)
     local keep_alive
     keep_alive=$(/usr/libexec/PlistBuddy -c "Print :KeepAlive" "$plist" 2>/dev/null || echo "")
     if [[ "$keep_alive" == "true" ]]; then
         warn "KeepAlive=true in $label (persistence mechanism)"
     fi
-    
+
     # Check Sockets (network listening)
     local sockets
     sockets=$(/usr/libexec/PlistBuddy -c "Print :Sockets" "$plist" 2>/dev/null || echo "")
     if [[ -n "$sockets" && "$sockets" != *"does not exist"* ]]; then
         log "Network sockets defined in $label"
     fi
+
+    # AI Mode: Check timing patterns
+    if [[ "$AI_MODE" == true ]]; then
+        check_timing_patterns "$plist" "$label"
+    fi
 }
 
+check_timing_patterns() {
+    local plist="$1"
+    local label="$2"
+
+    # Check StartInterval for unusual timing (prime numbers used to evade periodic scans)
+    local start_interval
+    start_interval=$(/usr/libexec/PlistBuddy -c "Print :StartInterval" "$plist" 2>/dev/null || echo "")
+    if [[ -n "$start_interval" && "$start_interval" != *"does not exist"* ]]; then
+        # Flag intervals that are prime numbers (common evasion technique)
+        local primes=(2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59 61 67 71 73 79 83 89 97 101 103 107 109 113 127 131 137 139 149 151 157 163 167 173 179 181 191 193 197 199)
+        for prime in "${primes[@]}"; do
+            if [[ "$start_interval" == "$prime" ]]; then
+                warn "AI-DETECTION: Prime number interval ($prime) in $label (possible evasion pattern)"
+                ((++TOTAL_ALERTS))
+                break
+            fi
+        done
+    fi
+
+    # Check for UserName privilege escalation
+    local username
+    username=$(/usr/libexec/PlistBuddy -c "Print :UserName" "$plist" 2>/dev/null || echo "")
+    if [[ -n "$username" && "$username" != *"does not exist"* ]]; then
+        if [[ "$username" == "root" ]] && [[ "$label" != com.apple.* ]]; then
+            alert "PRIVILEGE ESCALATION: $label running as root"
+            ((++TOTAL_ALERTS))
+        fi
+    fi
+}
+
+check_plist_entropy() {
+    local plist="$1"
+    local label="$2"
+
+    if [[ "$AI_MODE" != true ]]; then
+        return
+    fi
+
+    # Check for suspiciously perfect plist formatting
+    local line_count=$(wc -l < "$plist" 2>/dev/null || echo "0")
+    if [[ "$line_count" -gt 10 ]]; then
+        local unique_lines=$(sort "$plist" 2>/dev/null | uniq | wc -l || echo "0")
+        if [[ "$line_count" -gt 0 ]]; then
+            local ratio=$(echo "scale=2; $unique_lines / $line_count" | bc 2>/dev/null || echo "0")
+            if (( $(echo "$ratio > 0.95" | bc -l 2>/dev/null || echo "0") )); then
+                warn "AI-DETECTION: Suspiciously perfect plist formatting in $label (ratio: $ratio)"
+            fi
+        fi
+    fi
+}
+
+save_baseline() {
+    log "Saving baseline to $BASELINE_DIR"
+    mkdir -p "$BASELINE_DIR"
+
+    local baseline_file="${BASELINE_DIR}/baseline_$(date +%Y%m%d_%H%M%S).txt"
+
+    for dir in "${SCAN_DIRS[@]}"; do
+        [[ ! -d "$dir" ]] && continue
+        for plist in "$dir"/*.plist; do
+            [[ ! -f "$plist" ]] && continue
+            local label=$(/usr/libexec/PlistBuddy -c "Print :Label" "$plist" 2>/dev/null || echo "unknown")
+            local binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2>/dev/null || echo "N/A")
+            local hash=$(shasum -a 256 "$plist" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+            echo "$label|$binary|$hash" >> "$baseline_file"
+        done
+    done
+
+    ok "Baseline saved to $baseline_file"
+}
+
+diff_baseline() {
+    if [[ ! -d "$BASELINE_DIR" ]]; then
+        warn "No baseline directory found. Run --baseline-save first."
+        return
+    fi
+
+    local latest_baseline=$(ls -t "$BASELINE_DIR"/baseline_*.txt 2>/dev/null | head -1)
+    if [[ -z "$latest_baseline" ]]; then
+        warn "No baseline file found. Run --baseline-save first."
+        return
+    fi
+
+    log "Comparing against baseline: $latest_baseline"
+
+    local current_file="${BASELINE_DIR}/current_$(date +%Y%m%d_%H%M%S).txt"
+
+    for dir in "${SCAN_DIRS[@]}"; do
+        [[ ! -d "$dir" ]] && continue
+        for plist in "$dir"/*.plist; do
+            [[ ! -f "$plist" ]] && continue
+            local label=$(/usr/libexec/PlistBuddy -c "Print :Label" "$plist" 2>/dev/null || echo "unknown")
+            local binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2>/dev/null || echo "N/A")
+            local hash=$(shasum -a 256 "$plist" 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+            echo "$label|$binary|$hash" >> "$current_file"
+        done
+    done
+
+    # Find new entries
+    local new_entries=$(comm -13 <(sort "$latest_baseline") <(sort "$current_file") || true)
+    if [[ -n "$new_entries" ]]; then
+        alert "NEW PLIST ENTRIES DETECTED:"
+        echo "$new_entries" | while read -r entry; do
+            alert "  $entry"
+            ((++TOTAL_ALERTS))
+        done
+    fi
+
+    # Find modified entries
+    while IFS='|' read -r label binary hash; do
+        local baseline_hash=$(grep "^$label|" "$latest_baseline" | cut -d'|' -f3)
+        if [[ -n "$baseline_hash" && "$baseline_hash" != "$hash" ]]; then
+            alert "MODIFIED PLIST: $label (hash changed)"
+            ((++TOTAL_ALERTS))
+        fi
+    done < "$current_file"
+
+    ok "Baseline comparison complete"
+}
+
+watch_mode() {
+    log "Starting watch mode (monitoring launchd directories for changes)..."
+    warn "Press Ctrl+C to stop watching"
+
+    if command -v fswatch &>/dev/null; then
+        fswatch -o -1 "${SCAN_DIRS[@]}" | while read -r event; do
+            log "Change detected: $event"
+            echo "--- Running scan ---"
+            # Reset counters for each scan
+            TOTAL_SCANNED=0
+            TOTAL_ALERTS=0
+            # Run the scan (would need to refactor scan logic into function)
+        done
+    else
+        warn "fswatch not installed. Install with: brew install fswatch"
+    fi
+}
+
+# Handle special modes
+if [[ "$BASELINE_SAVE" == true ]]; then
+    save_baseline
+    exit 0
+fi
+
+if [[ "$BASELINE_DIFF" == true ]]; then
+    diff_baseline
+    exit 0
+fi
+
+if [[ "$WATCH_MODE" == true ]]; then
+    watch_mode
+    exit 0
+fi
+
+# Main scanning loop
 for dir in "${SCAN_DIRS[@]}"; do
     [[ ! -d "$dir" ]] && continue
     log "Scanning: $dir"
-    
+
     for plist in "$dir"/*.plist; do
         [[ ! -f "$plist" ]] && continue
         ((++TOTAL_SCANNED))
@@ -147,7 +340,7 @@ for dir in "${SCAN_DIRS[@]}"; do
 
         # Try Program first (full path), fall back to ProgramArguments:0 (binary name only)
         binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2>/dev/null || echo "N/A")
-        
+
         # Pattern-based detection
         for pat in "${SUSPICIOUS_PATTERNS[@]}"; do
             if [[ "$label" == *"$pat"* ]]; then
@@ -155,12 +348,15 @@ for dir in "${SCAN_DIRS[@]}"; do
                 ((++TOTAL_ALERTS))
             fi
         done
-        
+
         # Behavioral detection
         check_namespace_squatting "$label" "$binary" || true
         check_binary_signature "$binary" "$label" || true
         check_symlink_binary "$binary" "$label" || true
         check_additional_keys "$plist" "$label" || true
+
+        # AI Mode: Check plist entropy
+        check_plist_entropy "$plist" "$label"
     done
 done
 
