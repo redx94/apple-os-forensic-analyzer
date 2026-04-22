@@ -42,11 +42,14 @@ FINDINGS_LAUNCH=0
 check_parentage() {
   log "Running parent process analysis..."
   
-  if [[ -f "./score/parent_process_analyzer.sh" ]]; then
+  local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  
+  if [[ -f "$script_dir/parent_process_analyzer.sh" ]]; then
     local output="${OUTPUT_DIR}/parentage_${TIMESTAMP}.txt"
-    if ./score/parent_process_analyzer.sh > "$output" 2>&1; then
+    if "$script_dir/parent_process_analyzer.sh" > "$output" 2>&1; then
       # Count alerts in output
       local alerts=$(grep -c "ALERT" "$output" 2>/dev/null || echo "0")
+      alerts=$(echo "$alerts" | tr -d '\n' | xargs)
       FINDINGS_PARENTAGE=$alerts
       
       # Calculate score (inverse of findings, max 20)
@@ -74,10 +77,13 @@ check_parentage() {
 check_network() {
   log "Running network behavior analysis..."
   
-  if [[ -f "./score/network_behavior_analyzer.sh" ]]; then
+  local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  
+  if [[ -f "$script_dir/network_behavior_analyzer.sh" ]]; then
     local output="${OUTPUT_DIR}/network_${TIMESTAMP}.txt"
-    if ./score/network_behavior_analyzer.sh > "$output" 2>&1; then
+    if "$script_dir/network_behavior_analyzer.sh" > "$output" 2>&1; then
       local alerts=$(grep -c "ALERT" "$output" 2>/dev/null || echo "0")
+      alerts=$(echo "$alerts" | tr -d '\n' | xargs)
       FINDINGS_NETWORK=$alerts
       
       if [[ "$alerts" -eq 0 ]]; then
@@ -104,22 +110,25 @@ check_network() {
 check_signing() {
   log "Running code signing and integrity verification..."
   
+  local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local alerts=0
   
   # Run hash verifier
-  if [[ -f "./score/hash_verifier.sh" ]]; then
+  if [[ -f "$script_dir/hash_verifier.sh" ]]; then
     local output="${OUTPUT_DIR}/hash_${TIMESTAMP}.txt"
-    if ./score/hash_verifier.sh > "$output" 2>&1; then
+    if "$script_dir/hash_verifier.sh" > "$output" 2>&1; then
       local hash_alerts=$(grep -c "MISMATCH" "$output" 2>/dev/null || echo "0")
+      hash_alerts=$(echo "$hash_alerts" | tr -d '\n' | xargs)
       alerts=$((alerts + hash_alerts))
     fi
   fi
   
   # Run entitlement verifier
-  if [[ -f "./score/entitlement_verifier.sh" ]]; then
+  if [[ -f "$script_dir/entitlement_verifier.sh" ]]; then
     local output="${OUTPUT_DIR}/entitlement_${TIMESTAMP}.txt"
-    if ./score/entitlement_verifier.sh > "$output" 2>&1; then
+    if "$script_dir/entitlement_verifier.sh" > "$output" 2>&1; then
       local ent_alerts=$(grep -c "ALERT" "$output" 2>/dev/null || echo "0")
+      ent_alerts=$(echo "$ent_alerts" | tr -d '\n' | xargs)
       alerts=$((alerts + ent_alerts))
     fi
   fi
@@ -142,13 +151,16 @@ check_signing() {
 check_filesystem() {
   log "Running filesystem modification check..."
   
-  if [[ -f "./score/detect_agents.sh" ]]; then
+  local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  
+  if [[ -f "$script_dir/detect_agents.sh" ]]; then
     local output="${OUTPUT_DIR}/filesystem_${TIMESTAMP}.txt"
     
     # Run in baseline diff mode if baseline exists
     if [[ -d "$BASELINE_DIR" ]]; then
-      if ./score/detect_agents.sh --baseline-diff > "$output" 2>&1; then
+      if "$script_dir/detect_agents.sh" --baseline-diff > "$output" 2>&1; then
         local alerts=$(grep -c "ALERT" "$output" 2>/dev/null || echo "0")
+        alerts=$(echo "$alerts" | tr -d '\n' | xargs)
         FINDINGS_FILESYSTEM=$alerts
         
         if [[ "$alerts" -eq 0 ]]; then
@@ -167,8 +179,9 @@ check_filesystem() {
       fi
     else
       # Run normal detection if no baseline
-      if ./score/detect_agents.sh > "$output" 2>&1; then
+      if "$script_dir/detect_agents.sh" > "$output" 2>&1; then
         local alerts=$(grep -c "ALERT" "$output" 2>/dev/null || echo "0")
+        alerts=$(echo "$alerts" | tr -d '\n' | xargs)
         FINDINGS_FILESYSTEM=$alerts
         
         if [[ "$alerts" -eq 0 ]]; then
@@ -196,12 +209,15 @@ check_filesystem() {
 check_launch_config() {
   log "Running launch agent configuration analysis..."
   
-  if [[ -f "./score/detect_agents.sh" ]]; then
+  local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  
+  if [[ -f "$script_dir/detect_agents.sh" ]]; then
     local output="${OUTPUT_DIR}/launch_${TIMESTAMP}.txt"
     
     # Focus on configuration analysis
-    if ./score/detect_agents.sh > "$output" 2>&1; then
+    if "$script_dir/detect_agents.sh" > "$output" 2>&1; then
       local alerts=$(grep -c "ALERT" "$output" 2>/dev/null || echo "0")
+      alerts=$(echo "$alerts" | tr -d '\n' | xargs)
       FINDINGS_LAUNCH=$alerts
       
       if [[ "$alerts" -eq 0 ]]; then
@@ -300,8 +316,9 @@ main() {
       --baseline-save)
         log "Saving baseline for filesystem checks"
         mkdir -p "$BASELINE_DIR"
-        if [[ -f "./score/detect_agents.sh" ]]; then
-          ./score/detect_agents.sh --baseline-save
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -f "$script_dir/detect_agents.sh" ]]; then
+          "$script_dir/detect_agents.sh" --baseline-save
         fi
         exit 0
         ;;

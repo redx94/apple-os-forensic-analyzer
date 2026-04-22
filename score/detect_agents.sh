@@ -78,7 +78,7 @@ check_namespace_squatting() {
         
         if [[ "$is_trusted" == "false" ]]; then
             alert "NAMESPACE SQUATTING: $label → $binary (non-system path)"
-            ((++TOTAL_ALERTS))
+            TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
             return 1
         fi
     fi
@@ -104,7 +104,7 @@ check_binary_signature() {
     # Check if unsigned
     if ! codesign -v "$binary" 2>/dev/null; then
         alert "UNSIGNED APPLE-CLAIMING BINARY: $label → $binary"
-        ((++TOTAL_ALERTS))
+        TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
         return 1
     fi
     
@@ -117,7 +117,7 @@ check_binary_signature() {
     if [[ "$label" == com.apple.* ]]; then
         if ! echo "$authority" | grep -qiE "Apple|Software Signing"; then
             alert "NON-APPLE SIGNATURE ON APPLE NAMESPACE: $label → $binary (Signer: $authority)"
-            ((++TOTAL_ALERTS))
+            TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
             return 1
         fi
     fi
@@ -136,7 +136,7 @@ check_symlink_binary() {
         local target
         target=$(readlink "$binary")
         warn "SYMLINKED BINARY: $label → $binary -> $target"
-        ((++TOTAL_ALERTS))
+        TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
     fi
 }
 
@@ -184,7 +184,7 @@ check_timing_patterns() {
         for prime in "${primes[@]}"; do
             if [[ "$start_interval" == "$prime" ]]; then
                 warn "AI-DETECTION: Prime number interval ($prime) in $label (possible evasion pattern)"
-                ((++TOTAL_ALERTS))
+                TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
                 break
             fi
         done
@@ -196,7 +196,7 @@ check_timing_patterns() {
     if [[ -n "$username" && "$username" != *"does not exist"* ]]; then
         if [[ "$username" == "root" ]] && [[ "$label" != com.apple.* ]]; then
             alert "PRIVILEGE ESCALATION: $label running as root"
-            ((++TOTAL_ALERTS))
+            TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
         fi
     fi
 }
@@ -275,7 +275,7 @@ diff_baseline() {
         alert "NEW PLIST ENTRIES DETECTED:"
         echo "$new_entries" | while read -r entry; do
             alert "  $entry"
-            ((++TOTAL_ALERTS))
+            TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
         done
     fi
 
@@ -284,7 +284,7 @@ diff_baseline() {
         local baseline_hash=$(grep "^$label|" "$latest_baseline" | cut -d'|' -f3)
         if [[ -n "$baseline_hash" && "$baseline_hash" != "$hash" ]]; then
             alert "MODIFIED PLIST: $label (hash changed)"
-            ((++TOTAL_ALERTS))
+            TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
         fi
     done < "$current_file"
 
@@ -332,7 +332,7 @@ for dir in "${SCAN_DIRS[@]}"; do
 
     for plist in "$dir"/*.plist; do
         [[ ! -f "$plist" ]] && continue
-        ((++TOTAL_SCANNED))
+        TOTAL_SCANNED=$((TOTAL_SCANNED + 1))
 
         label=$(/usr/libexec/PlistBuddy -c "Print :Label" "$plist" 2>/dev/null || grep -A1 "<key>Label</key>" "$plist" | grep "<string>" | sed -E 's/.*<string>(.*)<\/string>.*/\1/')
 
@@ -345,7 +345,7 @@ for dir in "${SCAN_DIRS[@]}"; do
         for pat in "${SUSPICIOUS_PATTERNS[@]}"; do
             if [[ "$label" == *"$pat"* ]]; then
                 alert "SUSPICIOUS LABEL PATTERN: $label ($plist)"
-                ((++TOTAL_ALERTS))
+                TOTAL_ALERTS=$((TOTAL_ALERTS + 1))
             fi
         done
 
@@ -368,4 +368,7 @@ if [[ $TOTAL_ALERTS -gt 0 ]]; then
 else
     ok "No suspicious persistence detected"
 fi
+
+# Always return 0 - alerts are informational, not errors
+exit 0
 
