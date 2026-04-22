@@ -12,6 +12,11 @@ login_items_output/
 ios_forensic_output/
 forensic_reports/
 score_output/
+log_spoof_output/
+uti_hijack_output/
+defense_checklist_output/
+defense_baseline/
+agent_baseline/
 
 # GUI app
 gui-app/node_modules/
