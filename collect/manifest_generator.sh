@@ -68,7 +68,8 @@ for output_dir in extract_ids_output verify_trust_output xpc_scan_output validat
       "sha256": "${SHA256}",
       "size_bytes": ${FILESIZE},
       "collected_at": "${ACQUISITION_TIME}"
-    }EOF
+    }
+EOF
                 ADDED_ARTIFACTS=true
             fi
         done
@@ -84,3 +85,4 @@ ok "Manifest generated: $MANIFEST"
 log "Hostname: $HOSTNAME"
 log "OS: $OS_VERSION ($OS_BUILD)"
 log "Artifacts hashed: $(jq '.artifacts | length' "$MANIFEST" 2>/dev/null || echo "0")"
+
