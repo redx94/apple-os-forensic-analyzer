@@ -7,7 +7,7 @@ log()   { echo -e "${CYAN}[*]${NC} $*" | tee -a "$REPORT"; }
 ok()    { echo -e "${GREEN}[✓]${NC} $*" | tee -a "$REPORT"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $*" | tee -a "$REPORT"; }
 alert() { echo -e "${RED}${BOLD}[ALERT]${NC} $*" | tee -a "$REPORT"; }
-TARGETS=("com.apple.security.authd" "com.apple.SecurityServer" "com.apple.trustd"
+TARGETS=("com.apple.authd" "com.apple.SecurityServer" "com.apple.trustd"
          "com.apple.MobileFileIntegrity" "com.apple.tccd" "com.apple.lsd"
          "com.apple.sharingd" "com.apple.coreservices.launchservicesd")
 
@@ -20,13 +20,22 @@ check_dupes() {
 check_targets() {
     log "Checking high-value XPC target registration..."
     for t in "${TARGETS[@]}"; do
+        # Check launchctl list first
         local s; s=$(launchctl list "$t" 2>/dev/null || echo "NOT_REGISTERED")
-        if [[ "$s" == "NOT_REGISTERED" ]]; then
-            warn "$t → UNREGISTERED (squattable)"
-        else
+        if [[ "$s" != "NOT_REGISTERED" ]]; then
             local pid; pid=$(echo "$s" | grep -o '"PID" = [0-9]*' | awk '{print $3}' || echo "")
             [[ -n "$pid" ]] && ok "$t (PID: $pid)" || warn "$t → stopped (transient squat window)"
+            continue
         fi
+        
+        # Check MachServices in launchctl print system
+        local mach; mach=$(launchctl print system 2>/dev/null | grep "$t" || echo "")
+        if [[ -n "$mach" ]]; then
+            ok "$t (registered as MachService)"
+            continue
+        fi
+        
+        warn "$t → UNREGISTERED (squattable)"
     done
 }
 
@@ -36,8 +45,14 @@ scan_bundles() {
     while IFS= read -r -d '' b; do
         local bid; bid=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "${b}/Contents/Info.plist" 2>/dev/null || echo "")
         [[ "$bid" != com.apple.* ]] && continue
-        local sig; sig=$(codesign -dv "$b" 2>&1 | grep "Authority=" | head -1 || echo "UNSIGNED")
-        echo "$sig" | grep -qi "Apple" && ok "$bid — Apple signed" || { alert "NON-APPLE XPC: $b | $bid | $sig"; found=true; }
+        local sig; sig=$(codesign -dv "$b" 2>&1 || echo "UNSIGNED")
+        # Check entire certificate chain for Apple authority
+        if echo "$sig" | grep -qi "Apple"; then
+            ok "$bid — Apple signed"
+        else
+            alert "NON-APPLE XPC: $b | $bid | $sig"
+            found=true
+        fi
     done < <(find /System/Library/XPCServices /Library/Application\ Support /Applications -name "*.xpc" -print0 2>/dev/null)
     $found || ok "No suspicious XPC bundles found."
 }
