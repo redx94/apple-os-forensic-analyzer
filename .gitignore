@@ -46,3 +46,14 @@ env/
 
 # Secrets baseline (contains patterns, not actual secrets, but keep local)
 .secrets.baseline
+
+# Sensitive forensic reports and bounty submissions
+FORENSIC_REPORT_Apple_Bug_Bounty.md
+BOUNTY_SUBMISSION_Apple_Security.md
+
+# Sensitive output directories
+score/stress_test_output/
+collect/live_memory_output/
+
+# Lab safety file
+.lab_enabled
