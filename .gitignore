@@ -1,4 +1,5 @@
-# Output directories
+# Output directories (Catch-all)
+*_output/
 extract_ids_output/
 manifest_output/
 validate_output/
@@ -17,6 +18,17 @@ uti_hijack_output/
 defense_checklist_output/
 defense_baseline/
 agent_baseline/
+
+# Sensitive Forensic Reports and Bounty Submissions
+FORENSIC_REPORT_Apple_Bug_Bounty.md
+BOUNTY_SUBMISSION_Apple_Security.md
+ANALYSIS_CONTRACT.md
+SANITIZATION_REPORT.md
+"My reports (4-24-2026).csv"
+
+# Lab and Environment
+.lab_enabled
+lab/com.apple.system.updatehelper.plist
 
 # GUI app
 gui-app/node_modules/
@@ -46,14 +58,3 @@ env/
 
 # Secrets baseline (contains patterns, not actual secrets, but keep local)
 .secrets.baseline
-
-# Sensitive forensic reports and bounty submissions
-FORENSIC_REPORT_Apple_Bug_Bounty.md
-BOUNTY_SUBMISSION_Apple_Security.md
-
-# Sensitive output directories
-score/stress_test_output/
-collect/live_memory_output/
-
-# Lab safety file
-.lab_enabled
