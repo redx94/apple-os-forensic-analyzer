@@ -22,18 +22,11 @@ set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 TOOL_VERSION="3.0.0"
-OUTPUT_DIR="${1:-./manifest_output}"
+OUTPUT_DIR="./manifest_output"
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
 MANIFEST="${OUTPUT_DIR}/manifest_${TIMESTAMP}.json"
 LOCK_EVIDENCE="${LOCK_EVIDENCE:-false}"
 ANCHOR_TO_IPFS="${ANCHOR_TO_IPFS:-false}"
-
-mkdir -p "$OUTPUT_DIR"
-
-log()   { echo -e "${CYAN}[*]${NC} $*"; }
-ok()    { echo -e "${GREEN}[+]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
-alert() { echo -e "${RED}${BOLD}[ALERT]${NC} $*"; }
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -42,14 +35,23 @@ while [[ $# -gt 0 ]]; do
             ANCHOR_TO_IPFS=true
             shift
             ;;
+        --output-dir)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
         *)
-            if [[ "$1" != "$OUTPUT_DIR" ]]; then
-                OUTPUT_DIR="$1"
-            fi
+            OUTPUT_DIR="$1"
             shift
             ;;
     esac
 done
+
+mkdir -p "$OUTPUT_DIR"
+
+log()   { echo -e "${CYAN}[*]${NC} $*"; }
+ok()    { echo -e "${GREEN}[+]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
+alert() { echo -e "${RED}${BOLD}[ALERT]${NC} $*"; }
 
 # Generate Merkle tree hash for a directory
 generate_merkle_tree() {
