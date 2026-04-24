@@ -160,6 +160,146 @@ else
     ok "No suspicious plist patterns detected"
 fi
 
+# Provisioning Profile Audit (Enterprise Proliferation)
+log "Auditing provisioning profiles for enterprise proliferation..."
+PROFILE_AUDIT="${OUTPUT_DIR}/provisioning_profile_audit_${TIMESTAMP}.txt"
+
+# Known good developer IDs and MDM vendors (expand this list)
+KNOWN_GOOD_DEVELOPERS=(
+    "Apple Inc"
+    "Apple Distribution"
+    "Apple Development"
+    "iPhone Distribution"
+    "Mac App Store"
+    "Mac Developer"
+)
+
+KNOWN_MDM_VENDORS=(
+    "AirWatch"
+    "VMware"
+    "MobileIron"
+    "Jamf"
+    "Microsoft"
+    "Cisco"
+    "BlackBerry"
+    "Hexnode"
+    "Miradore"
+)
+
+find "$TARGET" -name "*.mobileprovision" -print0 2>/dev/null | while IFS= read -r -d '' profile; do
+    profile_name=$(basename "$profile")
+    log "Analyzing profile: $profile_name"
+    
+    # Extract profile content
+    profile_content=$(security cms -D -i "$profile" 2>/dev/null || cat "$profile" 2>/dev/null || true)
+    
+    if [[ -z "$profile_content" ]]; then
+        warn "Could not decode profile: $profile_name"
+        continue
+    fi
+    
+    # Check for enterprise provisioning
+    if echo "$profile_content" | grep -qi "enterprise"; then
+        echo "=== $profile_name ===" >> "$PROFILE_AUDIT"
+        echo "Type: Enterprise Provisioning Profile" >> "$PROFILE_AUDIT"
+        
+        # Extract TeamIdentifier
+        team_id=$(echo "$profile_content" | grep -A1 "TeamIdentifier" | tail -1 | tr -d '<>' | xargs || echo "Unknown")
+        echo "Team Identifier: $team_id" >> "$PROFILE_AUDIT"
+        
+        # Check if known developer
+        is_known=false
+        for dev in "${KNOWN_GOOD_DEVELOPERS[@]}"; do
+            if echo "$profile_content" | grep -qi "$dev"; then
+                is_known=true
+                break
+            fi
+        done
+        
+        if [[ "$is_known" == "false" ]]; then
+            alert "Unknown enterprise profile detected: $profile_name (Team: $team_id)"
+            echo "Status: UNKNOWN/LEAKED - Not associated with known-good developer" >> "$PROFILE_AUDIT"
+        else
+            ok "Known enterprise profile: $profile_name"
+            echo "Status: Known-good developer" >> "$PROFILE_AUDIT"
+        fi
+        
+        # Check if MDM-associated
+        is_mdm=false
+        for mdm in "${KNOWN_MDM_VENDORS[@]}"; do
+            if echo "$profile_content" | grep -qi "$mdm"; then
+                is_mdm=true
+                break
+            fi
+        done
+        
+        if [[ "$is_mdm" == "true" ]]; then
+            echo "MDM Association: Yes" >> "$PROFILE_AUDIT"
+        else
+            echo "MDM Association: No" >> "$PROFILE_AUDIT"
+        fi
+        
+        echo "" >> "$PROFILE_AUDIT"
+    fi
+done
+
+if [[ -f "$PROFILE_AUDIT" && -s "$PROFILE_AUDIT" ]]; then
+    alert "Enterprise provisioning profiles found - review $PROFILE_AUDIT"
+else
+    ok "No enterprise provisioning profiles detected"
+fi
+
+# Tethered Live Polling (if device connected via USB)
+log "Checking for tethered iOS device for live console polling..."
+LIVE_CONSOLE_OUTPUT="${OUTPUT_DIR}/live_console_${TIMESTAMP}.txt"
+
+if command -v cfgutil &>/dev/null; then
+    # Check if device is connected
+    device_info=$(cfgutil list 2>/dev/null || true)
+    
+    if [[ -n "$device_info" ]]; then
+        ok "iOS device detected - starting live console polling"
+        log "Device info: $device_info"
+        
+        # Pull real-time console logs to catch C2 heartbeat signals
+        log "Collecting live console logs (30 seconds)..."
+        timeout 30 cfgutil syslog -f "$LIVE_CONSOLE_OUTPUT" 2>/dev/null || true
+        
+        # Analyze for C2 heartbeat patterns
+        C2_PATTERNS=(
+            "heartbeat"
+            "keep-alive"
+            "ping.*http"
+            "c2.*server"
+            "command.*control"
+            "beacon"
+            "callback"
+            "http.*post.*encrypted"
+        )
+        
+        C2_DETECTED=false
+        for pattern in "${C2_PATTERNS[@]}"; do
+            if grep -qi "$pattern" "$LIVE_CONSOLE_OUTPUT" 2>/dev/null; then
+                alert "Potential C2 heartbeat pattern detected: $pattern"
+                grep -i "$pattern" "$LIVE_CONSOLE_OUTPUT" >> "${OUTPUT_DIR}/c2_alerts_${TIMESTAMP}.txt"
+                C2_DETECTED=true
+            fi
+        done
+        
+        if [[ "$C2_DETECTED" == "true" ]]; then
+            alert "C2 heartbeat signals detected - see ${OUTPUT_DIR}/c2_alerts_${TIMESTAMP}.txt"
+        else
+            ok "No C2 heartbeat patterns detected in live console"
+        fi
+        
+        ok "Live console logs saved to: $LIVE_CONSOLE_OUTPUT"
+    else
+        warn "No tethered iOS device detected (cfgutil available but no device connected)"
+    fi
+else
+    warn "cfgutil not available - install Apple Configurator for tethered live polling"
+fi
+
 # Summary
 echo -e "${BOLD}=== Analysis Complete ===${NC}"
 ok "Results saved to: $OUTPUT_DIR"

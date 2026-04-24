@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, PlaySquare, FileText, Activity, Terminal, ChevronRight, Cpu, HardDrive, Monitor, Copy } from 'lucide-react';
+import { Shield, PlaySquare, FileText, Activity, Terminal, ChevronRight, Cpu, HardDrive, Monitor, Copy, Wifi, WifiOff, Lock, Unlock } from 'lucide-react';
 import ToolCatalog from './components/ToolCatalog';
 import ExecutionPanel from './components/ExecutionPanel';
 import ResultsViewer from './components/ResultsViewer';
@@ -13,10 +13,13 @@ function App() {
   const [executionResult, setExecutionResult] = useState(null);
   const [tools, setTools] = useState(null);
   const [systemInfo, setSystemInfo] = useState(null);
+  const [airGapEnabled, setAirGapEnabled] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState(null);
 
   useEffect(() => {
     loadTools();
     loadSystemInfo();
+    loadNetworkStatus();
   }, []);
 
   const loadTools = async () => {
@@ -34,6 +37,27 @@ function App() {
       setSystemInfo(info);
     } catch (error) {
       console.error('Failed to load system info:', error);
+    }
+  };
+
+  const loadNetworkStatus = async () => {
+    try {
+      const status = await window.electronAPI.getNetworkStatus();
+      setNetworkStatus(status);
+      setAirGapEnabled(status.airGapEnabled);
+    } catch (error) {
+      console.error('Failed to load network status:', error);
+    }
+  };
+
+  const handleToggleAirGap = async () => {
+    try {
+      const result = await window.electronAPI.toggleNetworkAirGap();
+      setAirGapEnabled(result.enabled);
+      await loadNetworkStatus();
+    } catch (error) {
+      console.error('Failed to toggle air-gap:', error);
+      alert('Failed to toggle air-gap mode: ' + error.message);
     }
   };
 
@@ -174,7 +198,41 @@ function App() {
 
             {/* System Capsule */}
             {systemInfo && (
-              <div className="p-4 border-t border-border">
+              <div className="p-4 border-t border-border space-y-3">
+                {/* Forensic Air-Gap Toggle */}
+                <div className="rounded-xl bg-background/40 border border-border p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-semibold text-muted-foreground tracking-wide">FORENSIC AIR-GAP</div>
+                    {airGapEnabled ? <Lock className="w-4 h-4 text-accent" /> : <Unlock className="w-4 h-4 text-muted-foreground" />}
+                  </div>
+                  <button
+                    onClick={handleToggleAirGap}
+                    className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                      airGapEnabled
+                        ? 'bg-accent/20 text-accent border border-accent/30'
+                        : 'bg-muted hover:bg-muted/80 text-muted-foreground border border-border'
+                    }`}
+                  >
+                    {airGapEnabled ? (
+                      <>
+                        <WifiOff className="w-4 h-4" />
+                        <span>Network Disabled</span>
+                      </>
+                    ) : (
+                      <>
+                        <Wifi className="w-4 h-4" />
+                        <span>Enable Air-Gap</span>
+                      </>
+                    )}
+                  </button>
+                  {networkStatus && (
+                    <div className="mt-2 text-xs text-muted-foreground text-center">
+                      {airGapEnabled ? 'All network interfaces disabled' : `${networkStatus.activeInterfaces || 0} active interfaces`}
+                    </div>
+                  )}
+                </div>
+
+                {/* System Info */}
                 <div className="rounded-xl bg-background/40 border border-border p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-xs font-semibold text-muted-foreground tracking-wide">SYSTEM</div>

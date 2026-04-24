@@ -30,7 +30,27 @@ AI_RISK_INDICATORS = {
     "timing_precision": 5,        # Execution intervals that are suspiciously optimal
     "rapid_mutation": 15,         # File changed multiple times with no human-like iteration
     "cross_vector_correlation": 20, # Same identifier appears in launchd + XPC + UTI + logs
+    "environmental_keying": 25,   # Checks for forensic tool detection strings
+    "time_skew": 15,              # Suspiciously synchronized timestamps
 }
+
+# Forensic tool strings that malware checks for
+FORENSIC_TOOL_STRINGS = [
+    "Objective-See",
+    "KnockKnock",
+    "BlockBlock",
+    "Lulu",
+    "ReiKey",
+    "TaskExplorer",
+    "Legacy",
+    " forensic ",
+    "analysis",
+    "debugger",
+    "vmware",
+    "virtualbox",
+    "parallels",
+    "Apple_OS_Forensic_Analyzer",
+]
 
 def get_signature_info(binary_path):
     """Get code signature information for a binary"""
@@ -127,7 +147,100 @@ def score_path_risk(binary_path):
     
     return score, reasons
 
-def score_ai_likelihood(artifact_path, artifact_type="binary", historical_versions=None):
+def check_environmental_keying(binary_path):
+    """
+    Check if binary contains strings related to forensic tool detection.
+    Sophisticated malware often checks for forensic tools or VM environments.
+    """
+    score = 0
+    reasons = []
+    
+    if not Path(binary_path).exists():
+        return score, reasons
+    
+    try:
+        # Extract strings from binary
+        result = subprocess.run(
+            ["strings", binary_path],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        binary_strings = result.stdout.lower()
+        
+        # Check for forensic tool strings
+        found_tools = []
+        for tool in FORENSIC_TOOL_STRINGS:
+            if tool.lower() in binary_strings:
+                found_tools.append(tool)
+        
+        if found_tools:
+            score += AI_RISK_INDICATORS["environmental_keying"]
+            reasons.append(f"Binary contains forensic tool detection strings: {', '.join(found_tools[:3])}")
+    
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    
+    return score, reasons
+
+def check_time_skew(binary_path, plist_path=None):
+    """
+    Check for suspiciously synchronized timestamps.
+    AI-generated or scripted persistence often has identical mtime, atime, and birthtime.
+    """
+    score = 0
+    reasons = []
+    
+    if not Path(binary_path).exists():
+        return score, reasons
+    
+    try:
+        # Get binary timestamps
+        stat_result = Path(binary_path).stat()
+        
+        # On macOS, we can use stat command for more precision
+        try:
+            stat_output = subprocess.run(
+                ["stat", "-f", "%Sm %Aa %Bb", "-t", "%s", binary_path],
+                capture_output=True, text=True, timeout=5
+            )
+            if stat_output.returncode == 0:
+                timestamps = stat_output.stdout.strip().split()
+                if len(timestamps) >= 3:
+                    mtime = int(timestamps[0])
+                    atime = int(timestamps[1])
+                    birthtime = int(timestamps[2])
+                    
+                    # Check if all timestamps are identical (within 1 second)
+                    time_diffs = [
+                        abs(mtime - atime),
+                        abs(mtime - birthtime),
+                        abs(atime - birthtime)
+                    ]
+                    
+                    if all(diff < 1 for diff in time_diffs):
+                        score += AI_RISK_INDICATORS["time_skew"]
+                        reasons.append("Suspiciously synchronized timestamps (mtime, atime, birthtime identical)")
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        
+        # If plist path provided, check if binary and plist have identical timestamps
+        if plist_path and Path(plist_path).exists():
+            try:
+                binary_mtime = int(Path(binary_path).stat().st_mtime)
+                plist_mtime = int(Path(plist_path).stat().st_mtime)
+                
+                if abs(binary_mtime - plist_mtime) < 1:
+                    score += AI_RISK_INDICATORS["time_skew"]
+                    reasons.append("Binary and plist have identical timestamps (suspicious)")
+            except Exception:
+                pass
+    
+    except Exception:
+        pass
+    
+    return score, reasons
+
+def score_ai_likelihood(artifact_path, artifact_type="binary", historical_versions=None, plist_path=None):
     """
     Score how likely this artifact is AI-generated.
     Higher score = more likely crafted by AI for evasion.
@@ -137,6 +250,17 @@ def score_ai_likelihood(artifact_path, artifact_type="binary", historical_versio
     
     if not Path(artifact_path).exists():
         return score, reasons
+    
+    # Check for environmental keying (forensic tool detection strings)
+    if artifact_type == "binary":
+        env_score, env_reasons = check_environmental_keying(artifact_path)
+        score += env_score
+        reasons.extend(env_reasons)
+        
+        # Check for time skew
+        time_score, time_reasons = check_time_skew(artifact_path, plist_path)
+        score += time_score
+        reasons.extend(time_reasons)
     
     # Check formatting perfection (AI tends to produce 'too clean' output)
     if artifact_type in ("plist", "binary"):
@@ -186,7 +310,7 @@ def score_ai_likelihood(artifact_path, artifact_type="binary", historical_versio
     
     return score, reasons
 
-def calculate_risk_score(identifier, binary_path, historical_versions=None):
+def calculate_risk_score(identifier, binary_path, historical_versions=None, plist_path=None):
     """Calculate overall risk score (0-100)"""
     signature_info = get_signature_info(binary_path)
     entitlements = get_entitlements(binary_path)
@@ -194,10 +318,10 @@ def calculate_risk_score(identifier, binary_path, historical_versions=None):
     namespace_score, namespace_reasons = score_namespace_risk(identifier, binary_path, signature_info)
     ent_score, ent_reasons = score_entitlement_risk(entitlements)
     path_score, path_reasons = score_path_risk(binary_path)
-    ai_score, ai_reasons = score_ai_likelihood(binary_path, "binary", historical_versions)
+    ai_score, ai_reasons = score_ai_likelihood(binary_path, "binary", historical_versions, plist_path)
     
     # Updated risk formula: Total Risk = namespace_risk + entitlement_risk + path_risk + ai_likelihood_risk
-    # Max: 120 (capped at 100)
+    # Max: 150 (capped at 100) - increased due to new AI detection features
     total_score = min(namespace_score + ent_score + path_score + ai_score, 100)
     all_reasons = namespace_reasons + ent_reasons + path_reasons + ai_reasons
     

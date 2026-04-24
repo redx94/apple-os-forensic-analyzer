@@ -9,21 +9,98 @@
 # hostname, OS build, user, command line, SHA-256 hashes for
 # all artifacts, and tool version. This provides evidence
 # provenance for forensic defensibility.
+#
+# v2.1 Enhancement:
+# - Added Merkle tree hash generation for evidence immutability
+# - Optional evidence folder locking with tamper detection
 # ============================================================
 
 set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-TOOL_VERSION="2.0.0"
+TOOL_VERSION="2.1.0"
 OUTPUT_DIR="${1:-./manifest_output}"
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
 MANIFEST="${OUTPUT_DIR}/manifest_${TIMESTAMP}.json"
+LOCK_EVIDENCE="${LOCK_EVIDENCE:-false}"
 
 mkdir -p "$OUTPUT_DIR"
 
 log()   { echo -e "${CYAN}[*]${NC} $*"; }
 ok()    { echo -e "${GREEN}[+]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
+alert() { echo -e "${RED}${BOLD}[ALERT]${NC} $*"; }
+
+# Generate Merkle tree hash for a directory
+generate_merkle_tree() {
+    local dir="$1"
+    local hash_file="${dir}/.merkle_root.txt"
+    
+    if [[ ! -d "$dir" ]]; then
+        warn "Directory not found for Merkle tree: $dir"
+        return 1
+    fi
+    
+    log "Generating Merkle tree hash for: $dir"
+    
+    # Collect all file hashes sorted by path
+    local file_hashes=()
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" ]]; then
+            local file_hash=$(shasum -a 256 "$file" 2>/dev/null | cut -d' ' -f1)
+            local rel_path="${file#$dir/}"
+            file_hashes+=("$file_hash  $rel_path")
+        fi
+    done < <(find "$dir" -type f -print0 | sort -z)
+    
+    if [[ ${#file_hashes[@]} -eq 0 ]]; then
+        warn "No files found in directory for Merkle tree"
+        return 1
+    fi
+    
+    # Generate Merkle root by hashing all file hashes together
+    local all_hashes=$(printf '%s\n' "${file_hashes[@]}" | sort)
+    local merkle_root=$(echo -n "$all_hashes" | shasum -a 256 | cut -d' ' -f1)
+    
+    # Store Merkle root and file list
+    {
+        echo "MERKLE_ROOT: $merkle_root"
+        echo "GENERATED_AT: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "FILE_COUNT: ${#file_hashes[@]}"
+        echo "---"
+        printf '%s\n' "${file_hashes[@]}"
+    } > "$hash_file"
+    
+    # If locking is enabled, make the hash file immutable
+    if [[ "$LOCK_EVIDENCE" == "true" ]]; then
+        chflags uchg "$hash_file" 2>/dev/null || true
+        log "Evidence folder locked: $dir"
+    fi
+    
+    echo "$merkle_root"
+}
+
+# Verify Merkle tree hash (for score phase)
+verify_merkle_tree() {
+    local dir="$1"
+    local hash_file="${dir}/.merkle_root.txt"
+    
+    if [[ ! -f "$hash_file" ]]; then
+        warn "No Merkle tree file found: $hash_file"
+        return 1
+    fi
+    
+    local stored_root=$(grep "^MERKLE_ROOT:" "$hash_file" | cut -d' ' -f2)
+    local current_root=$(generate_merkle_tree "$dir")
+    
+    if [[ "$stored_root" == "$current_root" ]]; then
+        ok "Merkle tree verification passed"
+        return 0
+    else
+        alert "Merkle tree verification FAILED - evidence tampering detected!"
+        return 1
+    fi
+}
 
 log "Generating evidence manifest..."
 
@@ -33,6 +110,12 @@ OS_VERSION=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
 OS_BUILD=$(sw_vers -buildVersion 2>/dev/null || echo "unknown")
 USER=$(whoami)
 ACQUISITION_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Generate Merkle tree for extract_ids_output if it exists
+MERKLE_ROOT="null"
+if [[ -d "../extract_ids_output" ]]; then
+    MERKLE_ROOT=$(generate_merkle_tree "../extract_ids_output")
+fi
 
 # Start JSON manifest
 cat > "$MANIFEST" << EOF
@@ -44,6 +127,8 @@ cat > "$MANIFEST" << EOF
   "tool_version": "Apple_OS_Forensic_Analyzer ${TOOL_VERSION}",
   "user": "${USER}",
   "command_line": "$0 $*",
+  "evidence_locked": ${LOCK_EVIDENCE},
+  "merkle_root": "${MERKLE_ROOT}",
   "artifacts": [
 EOF
 
@@ -85,4 +170,13 @@ ok "Manifest generated: $MANIFEST"
 log "Hostname: $HOSTNAME"
 log "OS: $OS_VERSION ($OS_BUILD)"
 log "Artifacts hashed: $(jq '.artifacts | length' "$MANIFEST" 2>/dev/null || echo "0")"
+
+if [[ "$MERKLE_ROOT" != "null" ]]; then
+    ok "Merkle tree root: $MERKLE_ROOT"
+    if [[ "$LOCK_EVIDENCE" == "true" ]]; then
+        ok "Evidence folder locked with immutable hash file"
+    fi
+fi
+
+log "Usage: To verify evidence integrity, run verify_merkle_tree() during score phase"
 

@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readOutputDir: (dirName) => ipcRenderer.invoke('read-output-dir', dirName),
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
   requestPermissions: () => ipcRenderer.invoke('request-permissions'),
+  toggleNetworkAirGap: () => ipcRenderer.invoke('toggle-network-air-gap'),
+  getNetworkStatus: () => ipcRenderer.invoke('get-network-status'),
   onToolOutput: (callback) => ipcRenderer.on('tool-output', (event, data) => callback(data)),
   onToolError: (callback) => ipcRenderer.on('tool-error', (event, data) => callback(data)),
   removeListeners: () => {

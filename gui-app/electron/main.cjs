@@ -294,3 +294,102 @@ ipcMain.handle('get-system-info', () => {
     cpus: os.cpus().length
   };
 });
+
+// Forensic Air-Gap: Toggle network interfaces
+let networkDisabled = false;
+let originalNetworkStates = {};
+
+ipcMain.handle('toggle-network-air-gap', async () => {
+  return new Promise((resolve, reject) => {
+    if (process.platform !== 'darwin') {
+      reject(new Error('Air-Gap mode only supported on macOS'));
+      return;
+    }
+
+    // Get list of network services
+    exec('networksetup -listallnetworkservices', (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      const services = stdout.split('\n')
+        .filter(line => line && !line.includes('An asterisk (*) denotes that a network service is disabled.'))
+        .slice(1); // Skip header
+
+      if (networkDisabled) {
+        // Re-enable all network interfaces
+        let enabledCount = 0;
+        services.forEach(service => {
+          const serviceName = service.trim();
+          if (serviceName && originalNetworkStates[serviceName] === 'enabled') {
+            exec(`networksetup -setnetworkserviceenabled ${serviceName} on`, (err) => {
+              if (!err) enabledCount++;
+            });
+          }
+        });
+
+        networkDisabled = false;
+        originalNetworkStates = {};
+        resolve({ enabled: true, message: `Re-enabled ${enabledCount} network interfaces` });
+      } else {
+        // Disable all network interfaces
+        let disabledCount = 0;
+        services.forEach(service => {
+          const serviceName = service.trim();
+          if (serviceName) {
+            // Store current state
+            exec(`networksetup -getinfo ${serviceName}`, (err, stdout) => {
+              if (!err && stdout.includes('IP address:')) {
+                originalNetworkStates[serviceName] = 'enabled';
+              }
+            });
+
+            // Disable interface
+            exec(`networksetup -setnetworkserviceenabled ${serviceName} off`, (err) => {
+              if (!err) disabledCount++;
+            });
+          }
+        });
+
+        networkDisabled = true;
+        resolve({ enabled: false, message: `Disabled ${disabledCount} network interfaces for air-gap mode` });
+      }
+    });
+  });
+});
+
+ipcMain.handle('get-network-status', async () => {
+  return new Promise((resolve) => {
+    if (process.platform !== 'darwin') {
+      resolve({ airGapEnabled: false, platform: process.platform });
+      return;
+    }
+
+    exec('networksetup -listallnetworkservices', (error, stdout) => {
+      if (error) {
+        resolve({ airGapEnabled: false, error: error.message });
+        return;
+      }
+
+      const services = stdout.split('\n')
+        .filter(line => line && !line.includes('An asterisk (*) denotes that a network service is disabled.'))
+        .slice(1);
+
+      let activeCount = 0;
+      services.forEach(service => {
+        const serviceName = service.trim();
+        if (serviceName) {
+          exec(`networksetup -getinfo ${serviceName}`, (err, stdout) => {
+            if (!err && stdout.includes('IP address:')) {
+              activeCount++;
+            }
+          });
+        }
+      });
+
+      // If no active interfaces, assume air-gap is enabled
+      resolve({ airGapEnabled: networkDisabled || activeCount === 0, activeInterfaces: activeCount });
+    });
+  });
+});

@@ -25,6 +25,9 @@ WEIGHT_SIGNING=25
 WEIGHT_FILESYSTEM=20
 WEIGHT_LAUNCH=15
 
+# Dynamic weighting variables
+HAS_UNSIGNED_BINARIES=false
+
 # Initialize scores
 SCORE_PARENTAGE=0
 SCORE_NETWORK=0
@@ -73,7 +76,7 @@ check_parentage() {
   fi
 }
 
-# Check 2: Network Behavior (20%)
+# Check 2: Network Behavior (20% - dynamic)
 check_network() {
   log "Running network behavior analysis..."
   
@@ -86,16 +89,23 @@ check_network() {
       alerts=$(echo "$alerts" | tr -d '\n' | xargs)
       FINDINGS_NETWORK=$alerts
       
-      if [[ "$alerts" -eq 0 ]]; then
-        SCORE_NETWORK=20
-      elif [[ "$alerts" -lt 3 ]]; then
-        SCORE_NETWORK=15
-      elif [[ "$alerts" -lt 5 ]]; then
-        SCORE_NETWORK=10
-      else
-        SCORE_NETWORK=5
+      # Dynamic weighting: if unsigned binaries exist, network weight doubles
+      local effective_weight=$WEIGHT_NETWORK
+      if [[ "$HAS_UNSIGNED_BINARIES" == "true" ]]; then
+        effective_weight=$((WEIGHT_NETWORK * 2))
+        warn "Dynamic weighting applied: Network weight doubled due to unsigned binaries"
       fi
-      ok "Network check complete: $alerts findings"
+      
+      if [[ "$alerts" -eq 0 ]]; then
+        SCORE_NETWORK=$effective_weight
+      elif [[ "$alerts" -lt 3 ]]; then
+        SCORE_NETWORK=$((effective_weight - 5))
+      elif [[ "$alerts" -lt 5 ]]; then
+        SCORE_NETWORK=$((effective_weight - 10))
+      else
+        SCORE_NETWORK=$((effective_weight / 2))
+      fi
+      ok "Network check complete: $alerts findings (weight: $effective_weight)"
     else
       warn "Network analyzer failed to run"
       SCORE_NETWORK=10
@@ -112,6 +122,7 @@ check_signing() {
   
   local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local alerts=0
+  local unsigned_count=0
   
   # Run hash verifier
   if [[ -f "$script_dir/hash_verifier.sh" ]]; then
@@ -120,6 +131,10 @@ check_signing() {
       local hash_alerts=$(grep -c "MISMATCH" "$output" 2>/dev/null || echo "0")
       hash_alerts=$(echo "$hash_alerts" | tr -d '\n' | xargs)
       alerts=$((alerts + hash_alerts))
+      
+      # Check for unsigned binaries
+      unsigned_count=$(grep -c "unsigned" "$output" 2>/dev/null || echo "0")
+      unsigned_count=$(echo "$unsigned_count" | tr -d '\n' | xargs)
     fi
   fi
   
@@ -130,10 +145,21 @@ check_signing() {
       local ent_alerts=$(grep -c "ALERT" "$output" 2>/dev/null || echo "0")
       ent_alerts=$(echo "$ent_alerts" | tr -d '\n' | xargs)
       alerts=$((alerts + ent_alerts))
+      
+      # Additional check for unsigned binaries
+      local unsigned_check=$(grep -c "not signed" "$output" 2>/dev/null || echo "0")
+      unsigned_check=$(echo "$unsigned_check" | tr -d '\n' | xargs)
+      unsigned_count=$((unsigned_count + unsigned_check))
     fi
   fi
   
   FINDINGS_SIGNING=$alerts
+  
+  # Set flag for dynamic weighting if unsigned binaries found
+  if [[ "$unsigned_count" -gt 0 ]]; then
+    HAS_UNSIGNED_BINARIES=true
+    warn "Unsigned binaries detected: $unsigned_count"
+  fi
   
   if [[ "$alerts" -eq 0 ]]; then
     SCORE_SIGNING=25
@@ -255,12 +281,48 @@ calculate_overall_risk() {
   echo "$total_score:$risk_level:$total_findings"
 }
 
-# Generate JSON report
+# Generate JSON report with remediation advice
 generate_report() {
   local overall_risk=$(calculate_overall_risk)
   local overall_score=$(echo "$overall_risk" | cut -d: -f1)
   local risk_level=$(echo "$overall_risk" | cut -d: -f2)
   local total_findings=$(echo "$overall_risk" | cut -d: -f3)
+  
+  # Determine remediation steps based on check status
+  local parentage_remediation=""
+  if [[ "$SCORE_PARENTAGE" -lt 15 ]]; then
+    parentage_remediation='"Review parent_process_analyzer.sh output for suspicious process chains", "Investigate processes spawned by unexpected parent processes"'
+  else
+    parentage_remediation='"No action required"'
+  fi
+  
+  local network_remediation=""
+  if [[ "$SCORE_NETWORK" -lt 15 ]]; then
+    network_remediation='"Review network_behavior_analyzer.sh output for suspicious connections", "Block identified C2 domains in firewall", "Monitor outbound network traffic"'
+  else
+    network_remediation='"No action required"'
+  fi
+  
+  local signing_remediation=""
+  if [[ "$SCORE_SIGNING" -lt 20 ]]; then
+    signing_remediation='"Run: codesign -vvv --deep-verify [binary_path] for detailed analysis", "Run: pkgutil --check-signature [package_path] for package verification", "Quarantine unsigned binaries and investigate source"'
+  else
+    signing_remediation='"No action required"'
+  fi
+  
+  local filesystem_remediation=""
+  if [[ "$SCORE_FILESYSTEM" -lt 15 ]]; then
+    filesystem_remediation='"Review detect_agents.sh output for suspicious file modifications", "Compare against baseline using --baseline-diff", "Investigate new or modified launch agents/daemons"'
+  else
+    filesystem_remediation='"No action required"'
+  fi
+  
+  local launch_remediation=""
+  if [[ "$SCORE_LAUNCH" -lt 10 ]]; then
+    launch_remediation='"Review launch agent/daemon configurations", "Remove unauthorized plist files from ~/Library/LaunchAgents and /Library/LaunchDaemons", "Verify legitimate software using official sources"'
+  else
+    launch_remediation='"No action required"'
+  fi
   
   cat > "$REPORT_FILE" << EOF
 {
@@ -268,36 +330,42 @@ generate_report() {
   "overall_risk_score": $overall_score,
   "risk_level": "$risk_level",
   "total_findings": $total_findings,
+  "dynamic_weighting_applied": $HAS_UNSIGNED_BINARIES,
   "checks": {
     "parentage": {
       "score": $SCORE_PARENTAGE,
       "weight": $WEIGHT_PARENTAGE,
       "findings": $FINDINGS_PARENTAGE,
-      "status": $([ "$SCORE_PARENTAGE" -ge 15 ] && echo "PASS" || echo "FAIL")
+      "status": $([ "$SCORE_PARENTAGE" -ge 15 ] && echo "PASS" || echo "FAIL"),
+      "remediation_steps": [$parentage_remediation]
     },
     "network": {
       "score": $SCORE_NETWORK,
       "weight": $WEIGHT_NETWORK,
       "findings": $FINDINGS_NETWORK,
-      "status": $([ "$SCORE_NETWORK" -ge 15 ] && echo "PASS" || echo "FAIL")
+      "status": $([ "$SCORE_NETWORK" -ge 15 ] && echo "PASS" || echo "FAIL"),
+      "remediation_steps": [$network_remediation]
     },
     "signing": {
       "score": $SCORE_SIGNING,
       "weight": $WEIGHT_SIGNING,
       "findings": $FINDINGS_SIGNING,
-      "status": $([ "$SCORE_SIGNING" -ge 20 ] && echo "PASS" || echo "FAIL")
+      "status": $([ "$SCORE_SIGNING" -ge 20 ] && echo "PASS" || echo "FAIL"),
+      "remediation_steps": [$signing_remediation]
     },
     "filesystem": {
       "score": $SCORE_FILESYSTEM,
       "weight": $WEIGHT_FILESYSTEM,
       "findings": $FINDINGS_FILESYSTEM,
-      "status": $([ "$SCORE_FILESYSTEM" -ge 15 ] && echo "PASS" || echo "FAIL")
+      "status": $([ "$SCORE_FILESYSTEM" -ge 15 ] && echo "PASS" || echo "FAIL"),
+      "remediation_steps": [$filesystem_remediation]
     },
     "launch_config": {
       "score": $SCORE_LAUNCH,
       "weight": $WEIGHT_LAUNCH,
       "findings": $FINDINGS_LAUNCH,
-      "status": $([ "$SCORE_LAUNCH" -ge 10 ] && echo "PASS" || echo "FAIL")
+      "status": $([ "$SCORE_LAUNCH" -ge 10 ] && echo "PASS" || echo "FAIL"),
+      "remediation_steps": [$launch_remediation]
     }
   }
 }
