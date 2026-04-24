@@ -13,16 +13,20 @@
 # v2.1 Enhancement:
 # - Added Merkle tree hash generation for evidence immutability
 # - Optional evidence folder locking with tamper detection
+#
+# v3.0 Enhancement:
+# - Optional decentralized anchoring via IPFS for legal-grade proof
 # ============================================================
 
 set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-TOOL_VERSION="2.1.0"
+TOOL_VERSION="3.0.0"
 OUTPUT_DIR="${1:-./manifest_output}"
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
 MANIFEST="${OUTPUT_DIR}/manifest_${TIMESTAMP}.json"
 LOCK_EVIDENCE="${LOCK_EVIDENCE:-false}"
+ANCHOR_TO_IPFS="${ANCHOR_TO_IPFS:-false}"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -30,6 +34,22 @@ log()   { echo -e "${CYAN}[*]${NC} $*"; }
 ok()    { echo -e "${GREEN}[+]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 alert() { echo -e "${RED}${BOLD}[ALERT]${NC} $*"; }
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --anchor)
+            ANCHOR_TO_IPFS=true
+            shift
+            ;;
+        *)
+            if [[ "$1" != "$OUTPUT_DIR" ]]; then
+                OUTPUT_DIR="$1"
+            fi
+            shift
+            ;;
+    esac
+done
 
 # Generate Merkle tree hash for a directory
 generate_merkle_tree() {
@@ -100,6 +120,63 @@ verify_merkle_tree() {
         alert "Merkle tree verification FAILED - evidence tampering detected!"
         return 1
     fi
+}
+
+# Anchor manifest to IPFS for decentralized forensic proof
+anchor_to_ipfs() {
+    local manifest_file="$1"
+    local anchoring_record="${OUTPUT_DIR}/ipfs_anchoring_${TIMESTAMP}.txt"
+    
+    log "Attempting to anchor manifest to IPFS..."
+    
+    # Check if ipfs command is available
+    if ! command -v ipfs &>/dev/null; then
+        warn "ipfs command not available - skipping IPFS anchoring"
+        warn "Install IPFS: https://docs.ipfs.io/install/"
+        return 1
+    fi
+    
+    # Check if IPFS daemon is running
+    if ! ipfs swarm peers &>/dev/null; then
+        warn "IPFS daemon not running - skipping IPFS anchoring"
+        warn "Start IPFS daemon: ipfs daemon"
+        return 1
+    fi
+    
+    # Add manifest to IPFS
+    local ipfs_hash
+    ipfs_hash=$(ipfs add -q "$manifest_file" 2>/dev/null || true)
+    
+    if [[ -z "$ipfs_hash" ]]; then
+        warn "Failed to add manifest to IPFS"
+        return 1
+    fi
+    
+    # Pin the content to ensure it's not garbage collected
+    ipfs pin add "$ipfs_hash" &>/dev/null || true
+    
+    # Record the anchoring information
+    {
+        echo "IPFS_ANCHORING_RECORD"
+        echo "TIMESTAMP: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "MANIFEST_FILE: $manifest_file"
+        echo "IPFS_CID: $ipfs_hash"
+        echo "IPFS_GATEWAY: https://ipfs.io/ipfs/$ipfs_hash"
+        echo "LOCAL_GATEWAY: http://localhost:8080/ipfs/$ipfs_hash"
+        echo "---"
+        echo "To verify: ipfs cat $ipfs_hash | jq"
+    } > "$anchoring_record"
+    
+    ok "Manifest anchored to IPFS: $ipfs_hash"
+    ok "IPFS Gateway: https://ipfs.io/ipfs/$ipfs_hash"
+    ok "Anchoring record saved to: $anchoring_record"
+    
+    # Add IPFS CID to manifest
+    local temp_manifest="${OUTPUT_DIR}/manifest_${TIMESTAMP}_ipfs.json"
+    jq --arg ipfs "$ipfs_hash" '. + {"ipfs_cid": $ipfs, "ipfs_anchored_at": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' "$manifest_file" > "$temp_manifest"
+    mv "$temp_manifest" "$manifest_file"
+    
+    return 0
 }
 
 log "Generating evidence manifest..."
@@ -176,6 +253,11 @@ if [[ "$MERKLE_ROOT" != "null" ]]; then
     if [[ "$LOCK_EVIDENCE" == "true" ]]; then
         ok "Evidence folder locked with immutable hash file"
     fi
+fi
+
+# v3.0: Anchor to IPFS if requested
+if [[ "$ANCHOR_TO_IPFS" == "true" ]]; then
+    anchor_to_ipfs "$MANIFEST"
 fi
 
 log "Usage: To verify evidence integrity, run verify_merkle_tree() during score phase"

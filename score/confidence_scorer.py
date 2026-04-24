@@ -32,6 +32,7 @@ AI_RISK_INDICATORS = {
     "cross_vector_correlation": 20, # Same identifier appears in launchd + XPC + UTI + logs
     "environmental_keying": 25,   # Checks for forensic tool detection strings
     "time_skew": 15,              # Suspiciously synchronized timestamps
+    "hallucination": 100,         # v3.0: Metadata version mismatch with known Apple releases
 }
 
 # Forensic tool strings that malware checks for
@@ -240,7 +241,90 @@ def check_time_skew(binary_path, plist_path=None):
     
     return score, reasons
 
-def score_ai_likelihood(artifact_path, artifact_type="binary", historical_versions=None, plist_path=None):
+def check_hallucination(binary_path, identifier):
+    """
+    v3.0 Enhancement: Adversarial AI "Hallucination" Check
+    Detects AI-generated malware that attempts to spoof Apple metadata but fails
+    to match the specific build patterns of the host OS.
+    
+    If a binary claims a version that never existed for that OS build
+    (e.g., "v1.2.3" on a build where only "v1.2" was released),
+    triggers a 100/100 AI Likelihood score.
+    """
+    score = 0
+    reasons = []
+    
+    if not Path(binary_path).exists():
+        return score, reasons
+    
+    # Only check com.apple.* binaries
+    if not identifier.startswith("com.apple."):
+        return score, reasons
+    
+    # Get host OS build version
+    try:
+        host_build = subprocess.run(
+            ["sw_vers", "-buildVersion"],
+            capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return score, reasons
+    
+    # Extract CFBundleVersion and CFBundleShortVersionString from binary
+    try:
+        # For macOS binaries, version info is in the Info.plist embedded in the bundle
+        # For standalone binaries, we can try to extract version strings using strings
+        result = subprocess.run(
+            ["strings", binary_path],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        binary_strings = result.stdout
+        
+        # Look for version patterns
+        version_patterns = re.findall(r'\d+\.\d+\.\d+', binary_strings)
+        
+        if not version_patterns:
+            return score, reasons
+        
+        # Build a cache of known-good versions from /System/Library
+        known_versions = set()
+        system_lib = Path("/System/Library")
+        if system_lib.exists():
+            for app_dir in system_lib.glob("*.app"):
+                info_plist = app_dir / "Contents" / "Info.plist"
+                if info_plist.exists():
+                    try:
+                        version_output = subprocess.run(
+                            ["plutil", "-p", str(info_plist)],
+                            capture_output=True, text=True, timeout=5
+                        ).stdout
+                        versions = re.findall(r'CFBundleVersion" : "(\d+)', version_output)
+                        versions.extend(re.findall(r'CFBundleShortVersionString" : "(\d+\.\d+)', version_output))
+                        known_versions.update(versions)
+                    except (subprocess.TimeoutExpired, FileNotFoundError):
+                        pass
+        
+        # Check if binary's version is in known-good set
+        for version in version_patterns:
+            version_str = str(version)
+            # Extract major.minor for comparison
+            version_parts = version_str.split('.')[:2]
+            version_key = '.'.join(version_parts)
+            
+            # If the version pattern doesn't match any known-good versions
+            if known_versions and not any(version_key in v for v in known_versions):
+                score = AI_RISK_INDICATORS["hallucination"]
+                reasons.append(f"HALLUCINATION DETECTED: Binary claims version {version_str} which doesn't match known Apple releases for build {host_build}")
+                reasons.append(f"Known versions for this build: {', '.join(list(known_versions)[:5])}")
+                break
+    
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    
+    return score, reasons
+
+def score_ai_likelihood(artifact_path, artifact_type="binary", historical_versions=None, plist_path=None, identifier=None):
     """
     Score how likely this artifact is AI-generated.
     Higher score = more likely crafted by AI for evasion.
@@ -261,6 +345,12 @@ def score_ai_likelihood(artifact_path, artifact_type="binary", historical_versio
         time_score, time_reasons = check_time_skew(artifact_path, plist_path)
         score += time_score
         reasons.extend(time_reasons)
+        
+        # v3.0: Check for hallucination (metadata version mismatch)
+        if identifier:
+            halluc_score, halluc_reasons = check_hallucination(artifact_path, identifier)
+            score += halluc_score
+            reasons.extend(halluc_reasons)
     
     # Check formatting perfection (AI tends to produce 'too clean' output)
     if artifact_type in ("plist", "binary"):
@@ -318,7 +408,7 @@ def calculate_risk_score(identifier, binary_path, historical_versions=None, plis
     namespace_score, namespace_reasons = score_namespace_risk(identifier, binary_path, signature_info)
     ent_score, ent_reasons = score_entitlement_risk(entitlements)
     path_score, path_reasons = score_path_risk(binary_path)
-    ai_score, ai_reasons = score_ai_likelihood(binary_path, "binary", historical_versions, plist_path)
+    ai_score, ai_reasons = score_ai_likelihood(binary_path, "binary", historical_versions, plist_path, identifier)
     
     # Updated risk formula: Total Risk = namespace_risk + entitlement_risk + path_risk + ai_likelihood_risk
     # Max: 150 (capped at 100) - increased due to new AI detection features
