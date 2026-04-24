@@ -1,3 +1,6 @@
+# Sensitive data directory (NOT FOR PUBLIC VIEW)
+SENSITIVE_NOT_FOR_PUBLIC_VIEW/
+
 # Output directories (Catch-all)
 *_output/
 extract_ids_output/
