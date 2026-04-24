@@ -30,9 +30,95 @@ check_loc() {
     $ok_loc && ok "Trusted location: $b" || alert "SUSPICIOUS LOCATION: $b"
 }
 
+check_macho_load_commands() {
+    local b="$1"; [[ ! -f "$b" ]] && return
+    
+    # v3.0 Enhancement: Mach-O Load Command Deep Analysis
+    # Detects Dylib Hijacking via suspicious LC_RPATH and LC_LOAD_DYLIB commands
+    
+    if ! command -v otool &>/dev/null; then
+        warn "otool not available - skipping Mach-O load command analysis"
+        return
+    fi
+    
+    log "Analyzing Mach-O load commands for: $b"
+    
+    # Get all load commands
+    local load_commands
+    load_commands=$(otool -l "$b" 2>/dev/null || true)
+    
+    if [[ -z "$load_commands" ]]; then
+        return
+    fi
+    
+    # Suspicious load command patterns
+    local suspicious_rpaths=(
+        "@loader_path/../"
+        "@executable_path/../"
+        "/tmp/"
+        "/private/var/"
+        "/Users/Shared/"
+        "~/Library/"
+        "@rpath/./"
+    )
+    
+    # Check LC_RPATH entries
+    local rpath_found=false
+    if echo "$load_commands" | grep -q "LC_RPATH"; then
+        while IFS= read -r line; do
+            if echo "$line" | grep -q "path "; then
+                local rpath=$(echo "$line" | sed 's/.*path \(.*\) (.*/\1/')
+                
+                for susp in "${suspicious_rpaths[@]}"; do
+                    if echo "$rpath" | grep -q "$susp"; then
+                        alert "SUSPICIOUS LC_RPATH: $rpath in $b (potential dylib hijacking)"
+                        echo "  Load command: $line" >> "$REPORT"
+                        rpath_found=true
+                    fi
+                done
+            fi
+        done <<< "$load_commands"
+    fi
+    
+    # Check LC_LOAD_DYLIB commands pointing to non-standard locations
+    local suspicious_dylibs=0
+    if echo "$load_commands" | grep -q "LC_LOAD_DYLIB"; then
+        while IFS= read -r line; do
+            if echo "$line" | grep -q "name "; then
+                local dylib=$(echo "$line" | sed 's/.*name \(.*\) (.*/\1/')
+                
+                # Check for non-standard library locations
+                if echo "$dylib" | grep -qE "(/tmp/|/private/var/|/Users/[^/]+/\.|/usr/local/|@loader_path/\.\.|@executable_path/\.\.)"; then
+                    alert "SUSPICIOUS LC_LOAD_DYLIB: $dylib in $b (non-standard location)"
+                    echo "  Load command: $line" >> "$REPORT"
+                    suspicious_dylibs=$((suspicious_dylibs + 1))
+                fi
+            fi
+        done <<< "$load_commands"
+    fi
+    
+    # Check for LC_LOAD_WEAK_DYLIB (often used in dylib hijacking)
+    if echo "$load_commands" | grep -q "LC_LOAD_WEAK_DYLIB"; then
+        while IFS= read -r line; do
+            if echo "$line" | grep -q "name "; then
+                local weak_dylib=$(echo "$line" | sed 's/.*name \(.*\) (.*/\1/')
+                # Weak dylibs from non-standard locations are highly suspicious
+                if echo "$weak_dylib" | grep -qE "(/tmp/|/private/var/|/usr/local/)"; then
+                    alert "HIGH RISK: LC_LOAD_WEAK_DYLIB from suspicious path: $weak_dylib in $b"
+                    echo "  Load command: $line" >> "$REPORT"
+                fi
+            fi
+        done <<< "$load_commands"
+    fi
+    
+    if [[ "$rpath_found" == "false" && "$suspicious_dylibs" -eq 0 ]]; then
+        ok "Mach-O load commands appear normal"
+    fi
+}
+
 inspect() {
     local b="$1"; echo "" | tee -a "$REPORT"; echo -e "${BOLD}=== $b ===${NC}" | tee -a "$REPORT"
-    check_loc "$b"; check_sig "$b"; check_ents "$b"
+    check_loc "$b"; check_sig "$b"; check_ents "$b"; check_macho_load_commands "$b"
 }
 
 scan_plists() {
